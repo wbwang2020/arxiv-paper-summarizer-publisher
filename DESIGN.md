@@ -48,7 +48,7 @@
 ```yaml
 # config.yaml
 arxiv:
-  keywords: ["World Model"]       # 搜索关键词
+  keywords: ["你的关键词"]         # 搜索关键词
   categories: ["cs.LG", "cs.AI"]  # arXiv分类
   days_back: 7                    # 扫描最近N天的论文
   max_results: 50                 # 每次最大获取数量
@@ -1544,7 +1544,7 @@ import arxiv
 
 # 搜索论文
 search = arxiv.Search(
-    query='(cat:cs.LG OR cat:cs.AI) AND (all:"World Model")',
+    query='(cat:cs.LG OR cat:cs.AI) AND (all:"你的关键词")',
     max_results=50,
     sort_by=arxiv.SortCriterion.SubmittedDate
 )
@@ -1683,7 +1683,7 @@ arxiv-survey/
 ```yaml
 arxiv:
   keywords:
-    - "World Model"
+    - "你的关键词"
   categories:
     - "cs.LG"
     - "cs.AI"

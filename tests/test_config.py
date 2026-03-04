@@ -99,7 +99,7 @@ def test_config_from_yaml():
     yaml_content = """
     arxiv:
       keywords:
-        - "World Model"
+        - "测试关键词"
       categories:
         - "cs.LG"
         - "cs.AI"
@@ -133,7 +133,7 @@ def test_config_from_yaml():
     
     try:
         config = Config.from_yaml(temp_file)
-        assert config.arxiv.keywords == ["World Model"]
+        assert config.arxiv.keywords == ["测试关键词"]
         assert config.arxiv.categories == ["cs.LG", "cs.AI"]
         assert config.arxiv.days_back == 14
         assert config.arxiv.max_results == 100
@@ -150,7 +150,7 @@ def test_config_from_yaml():
 def test_config_from_env():
     """测试从环境变量加载配置"""
     # 设置环境变量
-    os.environ["ARXIV_KEYWORDS"] = "World Model,LLM"
+    os.environ["ARXIV_KEYWORDS"] = "测试关键词1,测试关键词2"
     os.environ["ARXIV_CATEGORIES"] = "cs.LG,cs.AI"
     os.environ["ARXIV_DAYS_BACK"] = "7"
     os.environ["ARXIV_MAX_RESULTS"] = "50"
@@ -164,7 +164,7 @@ def test_config_from_env():
     os.environ["ZHIHU_CREATE_COLUMN"] = "true"
     
     config = Config.from_env()
-    assert config.arxiv.keywords == ["World Model", "LLM"]
+    assert config.arxiv.keywords == ["测试关键词1", "测试关键词2"]
     assert config.arxiv.categories == ["cs.LG", "cs.AI"]
     assert config.arxiv.days_back == 7
     assert config.arxiv.max_results == 50
@@ -182,7 +182,7 @@ def test_config_to_yaml():
     """测试保存配置到YAML文件"""
     config = Config(
         arxiv=ArxivConfig(
-            keywords=["World Model"],
+            keywords=["测试关键词"],
             categories=["cs.LG"],
             days_back=7
         ),
@@ -202,7 +202,7 @@ def test_config_to_yaml():
         with open(temp_file, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
         
-        assert data['arxiv']['keywords'] == ["World Model"]
+        assert data['arxiv']['keywords'] == ["测试关键词"]
         assert data['arxiv']['categories'] == ["cs.LG"]
         assert data['arxiv']['days_back'] == 7
         assert data['storage']['base_dir'] == "./test_papers"

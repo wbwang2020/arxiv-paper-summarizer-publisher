@@ -17,7 +17,7 @@ def test_arxiv_survey_system_init():
         f.write("""
 arxiv:
   keywords:
-    - World Model
+    - 测试关键词
   categories:
     - cs.LG
   max_results: 10
@@ -59,7 +59,7 @@ scheduler:
         # 测试从配置文件初始化
         system = ArxivSurveySystem(config_path)
         assert system.config is not None
-        assert system.config.arxiv.keywords == ["World Model"]
+        assert system.config.arxiv.keywords == ["测试关键词"]
         assert system.config.arxiv.categories == ["cs.LG"]
     finally:
         if os.path.exists(config_path):

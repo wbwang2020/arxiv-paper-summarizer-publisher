@@ -12,7 +12,7 @@ from models.paper import ArxivPaper
 def test_arxiv_scanner_build_query():
     """测试ArxivScanner._build_query方法"""
     config = ArxivConfig(
-        keywords=["World Model", "LLM"],
+        keywords=["测试关键词1", "测试关键词2"],
         categories=["cs.LG", "cs.AI"]
     )
     scanner = ArxivScanner(config)
@@ -21,8 +21,8 @@ def test_arxiv_scanner_build_query():
     query = scanner._build_query()
     assert "cat:cs.LG" in query
     assert "cat:cs.AI" in query
-    assert 'all:"World Model"' in query
-    assert 'all:"LLM"' in query
+    assert 'all:"测试关键词1"' in query
+    assert 'all:"测试关键词2"' in query
     
     # 测试使用自定义关键词和分类
     query = scanner._build_query(
@@ -126,7 +126,7 @@ def test_arxiv_scanner_search_papers(mock_client_class, mock_search_class):
     mock_client.results.return_value = [mock_result]
     
     # 测试搜索
-    config = ArxivConfig(keywords=["World Model"], categories=["cs.LG"])
+    config = ArxivConfig(keywords=["测试关键词"], categories=["cs.LG"])
     scanner = ArxivScanner(config)
     papers = scanner.search_papers()
     

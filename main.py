@@ -142,7 +142,8 @@ def init_config():
 arxiv:
   # 搜索关键词（OR关系）
   keywords:
-    - "World Model"
+    # - "你的关键词1"
+    # - "你的关键词2"
   
   # arXiv分类（AND关系）
   categories:
