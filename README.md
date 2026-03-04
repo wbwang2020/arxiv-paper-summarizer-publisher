@@ -737,7 +737,7 @@ MIT License
 
 ## 贡献
 
-欢迎提交Issue和Pull Request！
+本项目不保证响应Issue和Pull Request。
 
 ## 更新日志
 

@@ -228,11 +228,11 @@ zhihu:
   
   # 知乎专栏配置（两种方式，优先级: column_id > column_name）
   # 方式1: 直接指定专栏ID
-  # column_id: "c_2011870444341454378"
+  # column_id: "你的专栏ID"
   
   # 方式2: 通过专栏名称搜索（支持部分匹配）
   # 系统会优先搜索当前用户的专栏，找不到则搜索所有专栏
-  column_name: "世界模型-arxiv预印本总结"
+  # column_name: "你的专栏名称"
   
   # 专栏不存在时是否自动创建（需要column_name配置）
   create_column_if_not_exists: false
