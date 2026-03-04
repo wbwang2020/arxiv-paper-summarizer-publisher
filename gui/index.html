@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArXiv文献自动总结系统</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 顶部导航栏 -->
+        <header class="header">
+            <h1>ArXiv文献自动总结系统</h1>
+            <button class="btn-refresh" onclick="refreshStatus()">刷新状态</button>
+        </header>
+
+        <!-- 标签导航 -->
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="control">运行控制</button>
+            <button class="tab-btn" data-tab="config">配置管理</button>
+            <button class="tab-btn" data-tab="papers">论文列表</button>
+            <button class="tab-btn" data-tab="status">系统状态</button>
+        </nav>
+
+        <!-- 主内容区域 -->
+        <main class="main-content">
+            <!-- 运行控制模块 -->
+            <section id="control" class="tab-content active">
+                <div class="panel">
+                    <h2>运行控制</h2>
+                    
+                    <div class="form-group">
+                        <label>运行模式：</label>
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="runMode" value="--run-once" checked>
+                                <span>完整流程：扫描+总结+发布</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="runMode" value="--scan">
+                                <span>仅扫描：扫描和总结论文</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="runMode" value="--publish">
+                                <span>仅发布：发布已总结的论文</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="runMode" value="--paper">
+                                <span>处理单篇论文</span>
+                                <input type="text" id="paperId" placeholder="输入arXiv ID，如：2401.12345" class="inline-input">
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="verboseMode">
+                            <span>显示详细日志 (-v)</span>
+                        </label>
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn-primary" onclick="startExecution()">开始执行</button>
+                        <button class="btn-secondary" onclick="stopExecution()">停止执行</button>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h3>执行输出</h3>
+                    <div id="outputArea" class="output-area">
+                        <div class="output-placeholder">点击"开始执行"查看输出...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 配置管理模块 -->
+            <section id="config" class="tab-content">
+                <div class="panel">
+                    <h2>配置管理</h2>
+                    
+                    <!-- 配置分类标签 -->
+                    <div class="config-tabs">
+                        <button class="config-tab active" data-config="arxiv">arXiv配置</button>
+                        <button class="config-tab" data-config="ai">AI配置</button>
+                        <button class="config-tab" data-config="storage">存储配置</button>
+                        <button class="config-tab" data-config="zhihu">知乎配置</button>
+                    </div>
+
+                    <!-- arXiv配置 -->
+                    <div id="config-arxiv" class="config-content active">
+                        <div class="form-group">
+                            <label>搜索关键词：</label>
+                            <div id="keywordsList" class="keywords-list">
+                                <!-- 动态生成 -->
+                            </div>
+                            <button class="btn-small" onclick="addKeyword()">+ 添加关键词</button>
+                        </div>
+
+                        <div class="form-group">
+                            <label>arXiv分类：</label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cat-csLG" value="cs.LG">
+                                    <span>cs.LG (机器学习)</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cat-csAI" value="cs.AI">
+                                    <span>cs.AI (人工智能)</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cat-csCV" value="cs.CV">
+                                    <span>cs.CV (计算机视觉)</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cat-csCL" value="cs.CL">
+                                    <span>cs.CL (计算语言学)</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="daysBack">扫描最近N天：</label>
+                                <input type="number" id="daysBack" min="1" max="365" value="14">
+                            </div>
+                            <div class="form-group">
+                                <label for="maxResults">最大结果数：</label>
+                                <input type="number" id="maxResults" min="1" max="100" value="10">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="sortBy">排序方式：</label>
+                            <select id="sortBy">
+                                <option value="submittedDate">提交日期</option>
+                                <option value="lastUpdatedDate">最后更新日期</option>
+                                <option value="relevance">相关度</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- AI配置 -->
+                    <div id="config-ai" class="config-content">
+                        <!-- AI配置子标签 -->
+                        <div class="ai-config-tabs">
+                            <button class="ai-config-tab active" data-ai-config="basic">基本设置</button>
+                            <button class="ai-config-tab" data-ai-config="prompts">提示词设置</button>
+                            <button class="ai-config-tab" data-ai-config="sections">章节定义</button>
+                        </div>
+
+                        <!-- 基本设置 -->
+                        <div id="ai-config-basic" class="ai-config-content active">
+                            <div class="form-group">
+                                <label for="aiProvider">AI提供商：</label>
+                                <select id="aiProvider">
+                                    <option value="deepseek">DeepSeek</option>
+                                    <option value="openai">OpenAI</option>
+                                    <option value="claude">Claude</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="aiApiKey">API密钥：</label>
+                                <input type="password" id="aiApiKey" placeholder="输入API密钥或环境变量语法">
+                                <small>支持环境变量语法：${ENV_VAR_NAME}</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="aiApiUrl">API地址：</label>
+                                <input type="text" id="aiApiUrl" placeholder="https://api.deepseek.com/v1/chat/completions">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="aiModel">模型名称：</label>
+                                <input type="text" id="aiModel" placeholder="deepseek-chat">
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="temperature">温度参数：</label>
+                                    <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7">
+                                    <span id="temperatureValue">0.7</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="maxTokens">最大Token数：</label>
+                                    <input type="number" id="maxTokens" min="1000" max="32000" value="8000">
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="maxInputTokens">最大输入Token数：</label>
+                                    <input type="number" id="maxInputTokens" min="1000" max="200000" value="131072">
+                                </div>
+                                <div class="form-group">
+                                    <label for="aiTimeout">请求超时时间（秒）：</label>
+                                    <input type="number" id="aiTimeout" min="60" max="600" value="300">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 提示词设置 -->
+                        <div id="ai-config-prompts" class="ai-config-content">
+                            <div class="form-group">
+                                <label for="systemPrompt">系统提示词：</label>
+                                <textarea id="systemPrompt" rows="10" placeholder="输入系统提示词（支持多行）"></textarea>
+                                <small>系统提示词将作为AI角色的基础指令</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="promptTemplate">提示词模板：</label>
+                                <textarea id="promptTemplate" rows="15" placeholder="输入提示词模板（支持占位符：{title}, {authors}, {abstract}等）"></textarea>
+                                <small>提示词模板用于生成具体的分析请求</small>
+                            </div>
+                        </div>
+
+                        <!-- 章节定义 -->
+                        <div id="ai-config-sections" class="ai-config-content">
+                            <div class="form-group">
+                                <label>章节定义：</label>
+                                <div class="table-container">
+                                    <table id="sectionsTable" class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>编号</th>
+                                                <th>字段名</th>
+                                                <th>描述</th>
+                                                <th>类型</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="sectionsTableBody">
+                                            <!-- 动态生成 -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="button-group">
+                                <button class="btn-small" onclick="addSection()">添加章节</button>
+                                <button class="btn-small" onclick="deleteSelectedSections()">删除选中</button>
+                                <button class="btn-small" onclick="moveSectionUp()">上移</button>
+                                <button class="btn-small" onclick="moveSectionDown()">下移</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 存储配置 -->
+                    <div id="config-storage" class="config-content">
+                        <div class="form-group">
+                            <label for="storageDir">存储目录：</label>
+                            <input type="text" id="storageDir" placeholder="./papers">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="storageFormat">存储格式：</label>
+                            <select id="storageFormat">
+                                <option value="markdown">Markdown</option>
+                                <option value="json">JSON</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="filenameTemplate">文件名模板：</label>
+                            <input type="text" id="filenameTemplate" placeholder="{date}_{arxiv_id}_{title}">
+                            <small>可用变量：{date}, {arxiv_id}, {title}, {category}</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="organizeBy">组织方式：</label>
+                            <select id="organizeBy">
+                                <option value="date">按日期</option>
+                                <option value="category">按分类</option>
+                                <option value="flat">平铺</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- 知乎配置 -->
+                    <div id="config-zhihu" class="config-content">
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="zhihuEnabled">
+                                <span>启用知乎发布</span>
+                            </label>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="zhihuCookie">知乎Cookie：</label>
+                            <textarea id="zhihuCookie" rows="3" placeholder="粘贴知乎Cookie"></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="zhihuColumn">专栏名称：</label>
+                            <input type="text" id="zhihuColumn" placeholder="世界模型-arxiv预印本总结">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="contentFillMode">正文填充模式：</label>
+                            <select id="contentFillMode">
+                                <option value="import_document">导入文档（推荐）</option>
+                                <option value="copy_paste">拷贝粘贴</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="zhihuDebug">
+                                <span>调试模式（输出详细日志）</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn-primary" onclick="saveConfig()">保存配置</button>
+                        <button class="btn-secondary" onclick="resetConfig()">重置配置</button>
+                        <button class="btn-secondary" onclick="exportConfig()">导出配置</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 论文列表模块 -->
+            <section id="papers" class="tab-content">
+                <div class="panel">
+                    <h2>论文列表</h2>
+                    
+                    <div class="filter-bar">
+                        <div class="filter-group">
+                            <label>筛选：</label>
+                            <select id="paperFilter" onchange="filterPapers()">
+                                <option value="all">全部</option>
+                                <option value="published">已发布</option>
+                                <option value="unpublished">未发布</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>搜索：</label>
+                            <input type="text" id="paperSearch" placeholder="输入标题或arXiv ID" oninput="searchPapers()">
+                        </div>
+                        <button class="btn-secondary" onclick="loadPapers()">刷新列表</button>
+                    </div>
+
+                    <div class="stats-bar">
+                        共 <span id="totalPapers">0</span> 篇论文
+                        （已发布：<span id="publishedCount">0</span>，
+                        未发布：<span id="unpublishedCount">0</span>）
+                    </div>
+
+                    <div class="table-container">
+                        <table id="papersTable" class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>状态</th>
+                                    <th>arXiv ID</th>
+                                    <th>标题</th>
+                                    <th>分类</th>
+                                    <th>日期</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="papersTableBody">
+                                <!-- 动态生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 系统状态模块 -->
+            <section id="status" class="tab-content">
+                <div class="panel">
+                    <h2>系统状态</h2>
+                    
+                    <div class="stats-cards">
+                        <div class="stat-card">
+                            <div class="stat-value" id="statTotal">0</div>
+                            <div class="stat-label">总论文数</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statPublished">0</div>
+                            <div class="stat-label">已发布</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statUnpublished">0</div>
+                            <div class="stat-label">待发布</div>
+                        </div>
+                    </div>
+
+                    <div class="zhihu-status">
+                        <h3>知乎状态</h3>
+                        <div id="zhihuStatus">
+                            <span class="status-dot gray"></span>
+                            <span>未检查</span>
+                        </div>
+                        <div class="button-group">
+                            <button class="btn-secondary" onclick="checkZhihuLogin()">检查登录状态</button>
+                        </div>
+                    </div>
+
+                    <div class="recent-operations">
+                        <h3>最近操作</h3>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>时间</th>
+                                    <th>操作</th>
+                                    <th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody id="operationsTableBody">
+                                <!-- 动态生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- 底部状态栏 -->
+        <footer class="footer">
+            <span id="systemStatus">系统就绪</span>
+            <span id="lastUpdate">最后更新：--</span>
+        </footer>
+    </div>
+
+    <!-- 论文详情弹窗 -->
+    <div id="paperModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>论文详情</h3>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="paperModalBody">
+                <!-- 动态生成 -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="publishBtn" onclick="publishPaper()">发布到知乎</button>
+                <button class="btn-secondary" onclick="closeModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 章节编辑弹窗 -->
+    <div id="sectionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>编辑章节</h3>
+                <button class="close-btn" onclick="closeSectionModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="sectionNumber">章节编号：</label>
+                    <input type="text" id="sectionNumber" placeholder="如：2">
+                    <small>对应提示词模板中的 ## N. 格式</small>
+                </div>
+                <div class="form-group">
+                    <label for="fieldName">字段名：</label>
+                    <input type="text" id="fieldName" placeholder="如：motivation">
+                    <small>映射到PaperSummary对象的字段名</small>
+                </div>
+                <div class="form-group">
+                    <label for="fieldDescription">描述：</label>
+                    <input type="text" id="fieldDescription" placeholder="如：研究动机">
+                </div>
+                <div class="form-group">
+                    <label>字段类型：</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="fieldType" value="string" checked>
+                            <span>文本</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="fieldType" value="list">
+                            <span>列表</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="saveSection()">保存</button>
+                <button class="btn-secondary" onclick="closeSectionModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
