@@ -24,7 +24,6 @@ document.addEventListener('DOMContentLoaded', function() {
     loadStats();
     loadOperations();
     loadOutputCache(); // 加载缓存的输出内容
-    loadOutputConfig(); // 加载输出配置
     
     // 温度滑块事件
     const temperatureSlider = document.getElementById('temperature');
@@ -82,6 +81,11 @@ function initConfigTabs() {
                     content.classList.add('active');
                 }
             });
+            
+            // 如果切换到输出配置标签，加载输出配置
+            if (configId === 'output') {
+                loadOutputConfig();
+            }
         });
     });
 }
@@ -1066,6 +1070,4 @@ async function saveOutputConfig() {
     }
 }
 
-// 在初始化时加载输出配置
-// 注意：避免重复的DOMContentLoaded事件监听器
-// 输出配置加载已在主初始化函数中调用
+// 输出配置现在作为配置管理的子标签，在切换到该标签时自动加载

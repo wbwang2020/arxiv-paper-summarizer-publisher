@@ -18,7 +18,6 @@
         <nav class="tabs">
             <button class="tab-btn active" data-tab="control">运行控制</button>
             <button class="tab-btn" data-tab="config">配置管理</button>
-            <button class="tab-btn" data-tab="output">输出配置</button>
             <button class="tab-btn" data-tab="papers">论文列表</button>
             <button class="tab-btn" data-tab="status">系统状态</button>
         </nav>
@@ -85,6 +84,7 @@
                         <button class="config-tab" data-config="ai">AI配置</button>
                         <button class="config-tab" data-config="storage">存储配置</button>
                         <button class="config-tab" data-config="zhihu">知乎配置</button>
+                        <button class="config-tab" data-config="output">输出配置</button>
                     </div>
 
                     <!-- arXiv配置 -->
@@ -311,28 +311,24 @@
                         </div>
                     </div>
 
-                    <div class="button-group">
-                        <button class="btn-primary" onclick="saveConfig()">保存配置</button>
-                        <button class="btn-secondary" onclick="resetConfig()">重置配置</button>
-                        <button class="btn-secondary" onclick="exportConfig()">导出配置</button>
-                    </div>
-                </div>
-            </section>
+                    <!-- 输出配置 -->
+                    <div id="config-output" class="config-content">
+                        <div class="output-config">
+                            <div class="output-modules" id="outputModules">
+                                <!-- 动态生成模块配置 -->
+                            </div>
+                        </div>
 
-            <!-- 输出配置模块 -->
-            <section id="output" class="tab-content">
-                <div class="panel">
-                    <h2>输出配置</h2>
-                    
-                    <div class="output-config">
-                        <div class="output-modules" id="outputModules">
-                            <!-- 动态生成模块配置 -->
+                        <div class="button-group">
+                            <button class="btn-primary" onclick="saveOutputConfig()">保存配置</button>
+                            <button class="btn-secondary" onclick="loadOutputConfig()">加载配置</button>
                         </div>
                     </div>
 
                     <div class="button-group">
-                        <button class="btn-primary" onclick="saveOutputConfig()">保存配置</button>
-                        <button class="btn-secondary" onclick="loadOutputConfig()">加载配置</button>
+                        <button class="btn-primary" onclick="saveConfig()">保存配置</button>
+                        <button class="btn-secondary" onclick="resetConfig()">重置配置</button>
+                        <button class="btn-secondary" onclick="exportConfig()">导出配置</button>
                     </div>
                 </div>
             </section>
