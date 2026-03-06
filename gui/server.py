@@ -10,9 +10,15 @@ import json
 import yaml
 import subprocess
 import socket
+import atexit
+import signal
+import time
+import platform
 from pathlib import Path
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
+
+
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,17 +41,205 @@ PAPERS_DIR = BASE_DIR / "papers"
 current_process = None
 is_processing = False
 
+# 服务器实例ID（用于前端检测服务器重启）
+SERVER_ID = str(time.time())
 
-def check_single_instance(port=5000):
-    """检查是否只有一个实例在运行"""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(1)
-    try:
-        sock.bind(('127.0.0.1', port))
-        sock.close()
-        return True
-    except socket.error:
-        return False
+# PID文件路径
+PID_FILE_PATH = BASE_DIR / "gui_server.pid"
+
+
+class SingleInstanceManager:
+    """单实例管理器 - 使用socket绑定+PID文件确保只有一个服务器实例运行"""
+    
+    def __init__(self, pid_file):
+        self.pid_file = Path(pid_file)
+        self.lock_socket = None
+        self.locked = False
+        
+    def _try_bind_socket(self, lock_port):
+        """尝试绑定socket端口用于单实例检查（使用单独的锁端口，不影响Flask）"""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.settimeout(1)
+            sock.bind(('127.0.0.1', lock_port))
+            sock.listen(1)
+            print(f"  成功绑定单实例锁端口 {lock_port}")
+            return sock
+        except socket.error as e:
+            print(f"  绑定单实例锁端口 {lock_port} 失败: {e}")
+            return None
+    
+    def _release_socket(self):
+        """释放socket"""
+        if self.lock_socket:
+            try:
+                self.lock_socket.close()
+            except:
+                pass
+            self.lock_socket = None
+    
+    def _read_pid_file(self):
+        """读取PID文件内容"""
+        try:
+            if self.pid_file.exists():
+                with open(self.pid_file, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if content:
+                        parts = content.split(',')
+                        if len(parts) >= 2:
+                            return {
+                                'pid': int(parts[0]),
+                                'start_time': float(parts[1]),
+                                'port': int(parts[2]) if len(parts) > 2 else 5000
+                            }
+        except Exception as e:
+            print(f"读取PID文件时出错: {e}")
+        return None
+    
+    def _write_pid_file(self, port=5000):
+        """写入PID文件"""
+        try:
+            with open(self.pid_file, 'w', encoding='utf-8') as f:
+                f.write(f"{os.getpid()},{time.time()},{port}")
+        except Exception as e:
+            print(f"写入PID文件时出错: {e}")
+    
+    def _is_process_running(self, pid):
+        """检查进程是否仍在运行"""
+        try:
+            if platform.system() == 'Windows':
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(1, False, pid)
+                if handle:
+                    kernel32.CloseHandle(handle)
+                    return True
+                return False
+            else:
+                # Unix/Linux
+                os.kill(pid, 0)
+                return True
+        except (OSError, ProcessLookupError):
+            return False
+    
+    def _find_existing_server(self):
+        """通过进程列表查找已运行的服务器实例"""
+        try:
+            import psutil
+            current_pid = os.getpid()
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if proc.info['pid'] == current_pid:
+                        continue
+                    cmdline = proc.info.get('cmdline', [])
+                    if cmdline and any('gui/server.py' in str(arg) for arg in cmdline):
+                        return {
+                            'pid': proc.info['pid'],
+                            'start_time': '未知',
+                            'port': 5000,
+                            'cmdline': ' '.join(str(arg) for arg in cmdline)
+                        }
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            return None
+        except ImportError:
+            # psutil未安装，使用备用方法
+            try:
+                if platform.system() == 'Windows':
+                    result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq python.exe', '/FO', 'CSV'], 
+                                          capture_output=True, text=True)
+                    # 简单检查是否有其他python进程
+                    lines = result.stdout.strip().split('\n')
+                    if len(lines) > 2:  # 标题行 + 当前进程 + 其他进程
+                        return {'pid': '未知', 'start_time': '未知', 'port': 5000}
+            except:
+                pass
+            return None
+    
+    def ensure_single_instance(self, port=5000):
+        """
+        确保只有一个实例在运行
+        使用单独的锁端口（port+1）进行单实例检查，不影响Flask绑定主端口
+        返回: (success: bool, message: str)
+        """
+        lock_port = port + 1  # 使用5001作为锁端口
+        
+        # 首先尝试绑定锁端口（最可靠的检查）
+        self.lock_socket = self._try_bind_socket(lock_port)
+        
+        if not self.lock_socket:
+            # socket绑定失败，说明已有实例在运行
+            # 尝试获取更多信息
+            pid_info = self._read_pid_file()
+            
+            if not pid_info:
+                # 无法读取PID，尝试通过进程列表查找
+                pid_info = self._find_existing_server()
+            
+            if pid_info:
+                existing_pid = pid_info.get('pid', '未知')
+                
+                # 检查进程是否仍在运行
+                if isinstance(existing_pid, int) and self._is_process_running(existing_pid):
+                    return False, (
+                        f"GUI服务器已经在运行\n"
+                        f"  PID: {existing_pid}\n"
+                        f"  端口: {pid_info.get('port', port)}\n\n"
+                        f"如需重新启动，请先终止现有实例：\n"
+                        f"  Windows: taskkill /F /PID {existing_pid}\n"
+                        f"  Linux/Mac: kill -9 {existing_pid}"
+                    )
+                else:
+                    # 进程不存在，清理僵尸PID文件
+                    print(f"警告：检测到僵尸PID文件（进程 {existing_pid} 已不存在）")
+                    print("正在清理...")
+                    try:
+                        self.pid_file.unlink()
+                    except:
+                        pass
+                    
+                    # 重新尝试绑定socket
+                    self.lock_socket = self._try_bind_socket(lock_port)
+                    if not self.lock_socket:
+                        return False, "锁端口仍被占用，可能有其他实例正在启动"
+            else:
+                return False, (
+                    "检测到已有GUI服务器实例在运行\n"
+                    "可能原因：\n"
+                    "  1. 另一个GUI服务器实例正在运行\n"
+                    "  2. 之前的实例异常退出，锁端口被占用\n\n"
+                    f"请检查是否有其他python进程在运行gui/server.py\n"
+                    f"  Windows: tasklist | findstr python\n"
+                    f"  Linux/Mac: ps aux | grep 'gui/server.py'"
+                )
+        
+        # 成功绑定socket，写入PID文件
+        self.locked = True
+        self._write_pid_file(port)
+        
+        # 注册清理函数
+        atexit.register(self.cleanup)
+        
+        return True, "成功获取单实例锁"
+    
+    def cleanup(self):
+        """清理资源"""
+        if self.locked:
+            print("\n正在清理单实例锁...")
+            self._release_socket()
+            self.locked = False
+        
+        try:
+            if self.pid_file.exists():
+                self.pid_file.unlink()
+                print("PID文件已清理")
+        except:
+            pass
+
+
+# 创建单实例管理器
+single_instance_manager = SingleInstanceManager(PID_FILE_PATH)
 
 
 @app.route('/')
@@ -299,10 +493,11 @@ def check_zhihu():
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """获取处理状态"""
-    global is_processing, current_process
+    global is_processing, current_process, SERVER_ID
     return jsonify({
         'is_processing': is_processing,
-        'has_process': current_process is not None
+        'has_process': current_process is not None,
+        'server_id': SERVER_ID
     })
 
 
@@ -315,15 +510,54 @@ def stop_process():
         return jsonify({'error': '没有正在运行的处理进程'}), 400
     
     try:
-        # 发送终止信号
-        current_process.terminate()
-        # 等待进程结束
-        current_process.wait(timeout=10)
-        # 重置状态
+        import psutil
+        import signal
+        
+        parent = psutil.Process(current_process.pid)
+        children = parent.children(recursive=True)
+        
+        for child in children:
+            try:
+                child.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        
+        try:
+            current_process.terminate()
+            current_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            for child in children:
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            try:
+                current_process.kill()
+                current_process.wait(timeout=5)
+            except:
+                pass
+        except Exception:
+            pass
+        
+        is_processing = False
+        current_process = None
+        return jsonify({'status': 'ok'})
+    except ImportError:
+        try:
+            current_process.terminate()
+            current_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            current_process.kill()
+            current_process.wait(timeout=5)
+        except Exception:
+            pass
+        
         is_processing = False
         current_process = None
         return jsonify({'status': 'ok'})
     except Exception as e:
+        is_processing = False
+        current_process = None
         return jsonify({'error': str(e)}), 500
 
 
@@ -358,22 +592,52 @@ def handle_output_config():
             return jsonify({'error': str(e)}), 500
 
 
+def signal_handler(signum, frame):
+    """信号处理函数"""
+    print(f"\n接收到信号 {signum}，正在关闭服务器...")
+    single_instance_manager.cleanup()
+    sys.exit(0)
+
+
 if __name__ == '__main__':
-    print("启动ArXiv文献自动总结系统GUI服务器...")
+    print("=" * 60)
+    print("ArXiv文献自动总结系统GUI服务器")
+    print("=" * 60)
     print(f"基础目录：{BASE_DIR}")
     print(f"配置路径：{CONFIG_PATH}")
     print(f"论文目录：{PAPERS_DIR}")
     print(f"调试模式：{app.debug}")
     print(f"端口设置：5000")
+    print("-" * 60)
+    
+    # 注册信号处理
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    if hasattr(signal, 'SIGBREAK'):  # Windows
+        signal.signal(signal.SIGBREAK, signal_handler)
+    
+    # 检查单实例
+    print("\n检查单实例...")
+    success, message = single_instance_manager.ensure_single_instance(port=5000)
+    if not success:
+        print("\n" + "=" * 60)
+        print("错误：无法启动服务器")
+        print("=" * 60)
+        print(message)
+        print("=" * 60)
+        sys.exit(1)
+    
+    print(message)
+    print(f"当前进程PID: {os.getpid()}")
+    print("-" * 60)
+    
     print("\n访问GUI界面：http://localhost:5000")
     print("按Ctrl+C停止服务器\n")
     
-    # 检查单实例
-    if not check_single_instance(port=5000):
-        print("错误：GUI服务器已经在运行（端口5000被占用）")
-        print("请关闭已运行的实例后再启动")
-        sys.exit(1)
-    
     # 明确禁用debug模式并设置端口为5000
     print("正在启动服务器...")
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    try:
+        app.run(debug=False, host='0.0.0.0', port=5000, threaded=True)
+    finally:
+        # 确保清理
+        single_instance_manager.cleanup()

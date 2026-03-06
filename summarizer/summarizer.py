@@ -7,6 +7,7 @@ import requests
 from config import AIConfig, Config
 from models import ArxivPaper, PaperSummary, FigureTableInfo, ReferenceInfo
 from utils import get_logger, chunk_text, estimate_tokens, get_output_handler, get_log_level
+from utils.exceptions import APIError, APIKeyError, APITimeoutError, APIRateLimitError
 
 logger = get_logger()
 
@@ -134,24 +135,60 @@ class PaperSummarizer:
     
     def _call_api_with_retry(self, prompt: str, max_retries: int) -> str:
         """带重试的API调用"""
+        last_error = None
         for attempt in range(max_retries):
             try:
                 return self._call_api(prompt)
-            except Exception as e:
-                output_handler.warning(f"API调用失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+            except APIKeyError as e:
+                # API密钥错误，不需要重试，直接抛出
+                output_handler.error(f"API密钥错误，停止重试: {e}")
+                raise
+            except APIRateLimitError as e:
+                # 频率限制错误，等待更长时间后重试
+                output_handler.warning(f"API频率限制 (尝试 {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt  # 指数退避
+                    wait_time = 2 ** (attempt + 2)  # 更长的指数退避
                     output_handler.info(f"{wait_time} 秒后重试...")
                     time.sleep(wait_time)
                 else:
-                    raise
+                    last_error = e
+            except APITimeoutError as e:
+                # 超时错误，可以重试
+                output_handler.warning(f"API请求超时 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    output_handler.info(f"{wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    last_error = e
+            except APIError as e:
+                # 其他API错误，可以重试
+                output_handler.warning(f"API调用失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    output_handler.info(f"{wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    last_error = e
+            except Exception as e:
+                # 未知错误
+                output_handler.error(f"未知错误 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    output_handler.info(f"{wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    last_error = e
         
-        raise RuntimeError("All retry attempts failed")
+        # 所有重试都失败了
+        if last_error:
+            raise last_error
+        raise APIError("All retry attempts failed")
     
     def _call_api(self, prompt: str) -> str:
         """调用AI API"""
         if not self.api_key:
-            raise ValueError("API key is not configured")
+            raise APIKeyError("API key is not configured")
         
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -181,9 +218,26 @@ class PaperSummarizer:
             
             output_handler.info(f"API响应状态: {response.status_code}")
             
-            if response.status_code != 200:
-                output_handler.error(f"API错误: {response.text}")
-                response.raise_for_status()
+            # 根据状态码处理不同类型的错误
+            if response.status_code == 401:
+                error_msg = "API密钥无效或已过期"
+                output_handler.error(f"{error_msg}: {response.text}")
+                raise APIKeyError(error_msg, status_code=401, response_text=response.text)
+            
+            elif response.status_code == 429:
+                error_msg = "API请求频率超限"
+                output_handler.error(f"{error_msg}: {response.text}")
+                raise APIRateLimitError(error_msg, status_code=429, response_text=response.text)
+            
+            elif response.status_code >= 500:
+                error_msg = f"API服务器错误 ({response.status_code})"
+                output_handler.error(f"{error_msg}: {response.text}")
+                raise APIError(error_msg, status_code=response.status_code, response_text=response.text)
+            
+            elif response.status_code != 200:
+                error_msg = f"API请求失败 ({response.status_code})"
+                output_handler.error(f"{error_msg}: {response.text}")
+                raise APIError(error_msg, status_code=response.status_code, response_text=response.text)
             
             result = response.json()
             output_handler.debug_print(f"API响应: {result}")
@@ -193,12 +247,25 @@ class PaperSummarizer:
             
             return content
             
+        except requests.exceptions.Timeout as e:
+            error_msg = f"API请求超时 ({self.config.timeout}秒)"
+            output_handler.error(error_msg)
+            raise APITimeoutError(error_msg)
+        
+        except requests.exceptions.ConnectionError as e:
+            error_msg = "无法连接到API服务器，请检查网络连接"
+            output_handler.error(f"{error_msg}: {e}")
+            raise APIError(error_msg)
+        
         except requests.exceptions.RequestException as e:
-            output_handler.error(f"API请求失败: {e}")
-            raise
+            error_msg = f"API请求失败: {e}"
+            output_handler.error(error_msg)
+            raise APIError(error_msg)
+        
         except (KeyError, IndexError) as e:
-            output_handler.error(f"解析API响应失败: {e}")
-            raise
+            error_msg = f"解析API响应失败: {e}"
+            output_handler.error(error_msg)
+            raise APIError(error_msg)
     
     def _parse_response(self, response: str, paper: ArxivPaper) -> PaperSummary:
         """

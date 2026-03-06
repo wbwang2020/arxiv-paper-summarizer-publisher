@@ -13,9 +13,33 @@ let selectedPaper = null;
 let currentSections = [];
 let editingSectionIndex = -1;
 let isProcessing = false;
+let currentServerId = null;
+
+// 检查服务器是否重启，如果是则清除输出缓存
+async function checkServerRestart() {
+    try {
+        const response = await fetch(`${API_BASE}/status`);
+        const data = await response.json();
+        const serverId = data.server_id;
+        
+        const lastServerId = localStorage.getItem('serverId');
+        
+        if (lastServerId && lastServerId !== serverId) {
+            console.log('检测到服务器重启，清除输出缓存');
+            localStorage.removeItem('outputCache');
+        }
+        
+        localStorage.setItem('serverId', serverId);
+        currentServerId = serverId;
+    } catch (error) {
+        console.error('检查服务器状态失败:', error);
+    }
+}
 
 // 初始化
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+    await checkServerRestart(); // 先检查服务器是否重启
+    
     initTabs();
     initConfigTabs();
     initAIConfigTabs();

@@ -1571,43 +1571,99 @@ output_handler.error("错误信息")
 - **配置编辑**: 基于现有config.yaml进行编辑
 - **数据显示**: 基于现存brief.json进行论文信息显示
 - **单实例约束**: 同一时间只能运行一个GUI服务器实例
+- **缓存管理**: 服务器重启后自动清除输出缓存
 
 #### 3.11.2 后端设计 (server.py)
 ```python
 class FlaskBackend:
     """Flask后端服务器"""
     
-    def check_single_instance(port=5000):
-        """检查是否只有一个实例在运行"""
-        # 通过socket绑定检查端口占用
-        pass
+    # 全局状态
+    current_process = None        # 当前执行的子进程
+    is_processing = False         # 是否正在处理
+    SERVER_ID = str(time.time())  # 服务器实例ID（用于检测重启）
+
+class SingleInstanceManager:
+    """单实例管理器 - 使用socket绑定+PID文件确保只有一个服务器实例运行"""
     
-    @app.route('/api/run', methods=['POST'])
-    def run_main():
-        """执行main.py命令"""
-        # 接收前端参数，调用main.py
-        pass
+    def __init__(self, pid_file):
+        self.pid_file = Path(pid_file)
+        self.lock_socket = None
+        self.locked = False
     
-    @app.route('/api/config', methods=['GET', 'POST'])
-    def config():
-        """获取/更新配置"""
-        pass
+    def ensure_single_instance(self, port=5000):
+        """确保只有一个实例在运行
+        使用单独的锁端口（port+1）进行单实例检查，不影响Flask绑定主端口
+        """
+        lock_port = port + 1  # 使用5001作为锁端口
+        
+        # 首先尝试绑定锁端口（最可靠的检查）
+        self.lock_socket = self._try_bind_socket(lock_port)
+        
+        if not self.lock_socket:
+            # socket绑定失败，说明已有实例在运行
+            pid_info = self._read_pid_file()
+            if pid_info and self._is_process_running(pid_info.get('pid')):
+                return False, "已有实例在运行"
+            else:
+                # 僵尸PID文件，清理后重试
+                self.pid_file.unlink()
+                self.lock_socket = self._try_bind_socket(lock_port)
+        
+        # 成功获取锁，写入PID文件
+        self._write_pid_file(port)
+        return True, "成功获取单实例锁"
     
-    @app.route('/api/papers', methods=['GET'])
-    def list_papers():
-        """获取论文列表"""
-        pass
-    
-    @app.route('/api/paper/<arxiv_id>', methods=['GET'])
-    def get_paper(arxiv_id):
-        """获取单篇论文详情"""
-        pass
-    
-    @app.route('/api/config/output', methods=['GET', 'POST'])
-    def handle_output_config():
-        """输出配置管理"""
-        # 读取和保存输出配置
-        pass
+    def cleanup(self):
+        """清理资源"""
+        self._release_socket()
+        if self.pid_file.exists():
+            self.pid_file.unlink()
+
+# API路由
+@app.route('/api/run', methods=['POST'])
+def run_main():
+    """执行main.py命令"""
+    pass
+
+@app.route('/api/stop', methods=['POST'])
+def stop_process():
+    """停止当前处理进程"""
+    # 使用psutil递归终止所有子进程
+    parent = psutil.Process(current_process.pid)
+    children = parent.children(recursive=True)
+    for child in children:
+        child.terminate()
+    current_process.terminate()
+
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """获取处理状态"""
+    return jsonify({
+        'is_processing': is_processing,
+        'has_process': current_process is not None,
+        'server_id': SERVER_ID  # 用于前端检测服务器重启
+    })
+
+@app.route('/api/config', methods=['GET', 'POST'])
+def config():
+    """获取/更新配置"""
+    pass
+
+@app.route('/api/papers', methods=['GET'])
+def list_papers():
+    """获取论文列表"""
+    pass
+
+@app.route('/api/paper/<arxiv_id>', methods=['GET'])
+def get_paper(arxiv_id):
+    """获取单篇论文详情"""
+    pass
+
+@app.route('/api/config/output', methods=['GET', 'POST'])
+def handle_output_config():
+    """输出配置管理"""
+    pass
 ```
 
 #### 3.11.3 前端设计 (index.html + app.js)
@@ -1623,6 +1679,8 @@ class FlaskBackend:
 |------|------|------|
 | / | GET | 返回index.html主页 |
 | /api/run | POST | 执行main.py命令 |
+| /api/stop | POST | 停止当前处理进程 |
+| /api/status | GET | 获取处理状态和服务器ID |
 | /api/config | GET/POST | 获取/更新配置 |
 | /api/papers | GET | 获取论文列表 |
 | /api/paper/<id> | GET | 获取论文详情 |
@@ -1630,22 +1688,95 @@ class FlaskBackend:
 
 #### 3.11.5 单实例约束实现
 ```python
-def check_single_instance(port=5000):
-    """检查是否只有一个实例在运行"""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(1)
-    try:
-        sock.bind(('127.0.0.1', port))
-        sock.close()
-        return True
-    except socket.error:
-        return False
-
-# 启动时检查
-if not check_single_instance(port=5000):
-    print("错误：GUI服务器已经在运行（端口5000被占用）")
-    sys.exit(1)
+def ensure_single_instance(self, port=5000):
+    """确保只有一个实例在运行
+    使用单独的锁端口（port+1）进行单实例检查，不影响Flask绑定主端口
+    """
+    lock_port = port + 1  # 使用5001作为锁端口
+    
+    # 首先尝试绑定锁端口（最可靠的检查）
+    self.lock_socket = self._try_bind_socket(lock_port)
+    
+    if not self.lock_socket:
+        # socket绑定失败，说明已有实例在运行
+        # 尝试获取更多信息
+        pid_info = self._read_pid_file()
+        
+        if pid_info:
+            existing_pid = pid_info.get('pid')
+            # 检查进程是否仍在运行
+            if self._is_process_running(existing_pid):
+                return False, f"GUI服务器已经在运行 (PID: {existing_pid})"
+            else:
+                # 僵尸PID文件，清理后重试
+                self.pid_file.unlink()
+                self.lock_socket = self._try_bind_socket(lock_port)
+    
+    # 成功获取锁，写入PID文件
+    self._write_pid_file(port)
+    return True, "成功获取单实例锁"
 ```
+
+**关键设计点**:
+- 使用独立锁端口(5001)进行单实例检查，避免与Flask服务端口(5000)冲突
+- 实现跨平台文件锁机制（Windows使用msvcrt.locking，Unix/Linux使用fcntl）
+- 添加僵尸进程检测和清理功能
+- 支持进程列表查找作为PID文件读取失败的回退机制
+
+#### 3.11.6 输出缓存清理机制
+```javascript
+// 前端检测服务器重启
+async function checkServerRestart() {
+    const response = await fetch('/api/status');
+    const data = await response.json();
+    const serverId = data.server_id;
+    
+    const lastServerId = localStorage.getItem('serverId');
+    
+    if (lastServerId && lastServerId !== serverId) {
+        // 服务器已重启，清除输出缓存
+        localStorage.removeItem('outputCache');
+    }
+    
+    localStorage.setItem('serverId', serverId);
+}
+```
+
+**工作流程**:
+1. 服务器启动时生成唯一SERVER_ID（基于时间戳）
+2. 前端页面加载时调用`/api/status`获取当前SERVER_ID
+3. 与localStorage中保存的旧SERVER_ID比较
+4. 如果不同，说明服务器已重启，清除输出缓存
+5. 保存新的SERVER_ID到localStorage
+
+#### 3.11.7 进程终止机制
+```python
+def stop_process():
+    """停止当前处理进程"""
+    import psutil
+    
+    parent = psutil.Process(current_process.pid)
+    children = parent.children(recursive=True)
+    
+    # 先终止所有子进程
+    for child in children:
+        child.terminate()
+    
+    # 再终止主进程
+    current_process.terminate()
+    current_process.wait(timeout=5)
+    
+    # 如果超时，强制kill
+    if current_process.poll() is None:
+        for child in children:
+            child.kill()
+        current_process.kill()
+```
+
+**关键设计点**:
+- 使用psutil递归获取所有子进程（包括Playwright浏览器进程）
+- 先尝试优雅终止(SIGTERM)，超时后强制终止(SIGKILL)
+- 确保所有相关进程都被正确清理
 
 ---
 
@@ -1979,60 +2110,4 @@ python main.py --stats
 
 ## 11. 更新日志
 
-### v1.5.0 (2026-03-04)
-- ✅ 章节配置外部化实现 - 将章节定义从代码移到 `config.yaml`
-- ✅ 支持灵活的章节映射配置
-- ✅ 新增 `SummarySectionConfig` 配置类
-- ✅ 新增 `summary_sections` 配置字段
-- ✅ 更新 `PaperSummarizer` 实现，支持动态章节解析
-- ✅ 支持不同字段类型的解析（string, list）
-- ✅ 提高系统灵活性和可扩展性
-- ✅ 添加 `_build_section_mappings()` 方法构建章节映射
-- ✅ 重构 `_parse_response()` 方法使用配置的章节映射
-- ✅ 验证章节配置加载和映射功能正常工作
-
-### v1.4.0 (2026-03-04)
-- ✅ 提示词配置外部化 - 从代码硬编码改为从 `config.yaml` 读取
-- ✅ 支持自定义系统提示词 (`system_prompt`)
-- ✅ 支持自定义提示词模板 (`prompt_template`)
-- ✅ 使用YAML block scalar syntax (`|`) 提高多行文本可读性
-- ✅ 移除 `summarizer/prompt.py` 文件，简化代码结构
-- ✅ 更新DESIGN文档，反映新的提示词配置设计
-
-### v1.3.0 (2026-03-04)
-- ✅ 实现轻量级Web GUI界面
-- ✅ 支持配置文件在线编辑
-- ✅ 支持论文列表查看
-- ✅ 支持实时日志输出
-- ✅ 支持单实例运行约束
-- ✅ 所有日志信息中文化
-
-### v1.2.0 (2026-03-03)
-- ✅ 实现Playwright浏览器自动化发布方案
-- ✅ 支持超时处理机制（最多3次尝试获取文章URL）
-- ✅ 支持内容长度检查（确保不少于8个字符）
-- ✅ 支持发布按钮激活状态检查
-- ✅ 支持Markdown解析对话框处理
-- ✅ 支持下拉菜单操作优化
-- ✅ 支持详细截图功能（便于调试）
-- ✅ 优化专栏选择逻辑，通过"专栏收录"->"发布到专栏"路径
-- ✅ 实现标题长度检查和截断功能（确保不超过100字）
-- ✅ 支持从现有Markdown文件直接发布
-
-### v1.1.0 (2026-03-02)
-- ✅ 实现年-月文件夹结构存储 (YYYY-MM)
-- ✅ 实现每个文件夹JSON格式简报 (brief.json)
-- ✅ 实现最近两个月智能跳过机制
-- ✅ 新增 `exists_in_recent_months()` API
-- ✅ 新增 `list_recent_summaries()` API
-- ✅ 新增 `get_folder_brief()` API
-- ✅ 优化统计功能，支持按文件夹统计
-
-### v1.0.0 (2026-03-02)
-- ✅ 实现arXiv论文自动扫描
-- ✅ 实现DeepSeek AI总结（20维度分析）
-- ✅ 实现Markdown本地存储
-- ✅ 实现知乎发布功能（API限制）
-- ✅ 实现进度显示功能
-- ✅ 实现环境变量配置覆盖
-- ✅ 支持128k上下文长度
+详见 [CHANGELOG.md](CHANGELOG.md)

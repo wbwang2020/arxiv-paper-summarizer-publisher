@@ -13,6 +13,7 @@ from storage import PaperStorage
 from publisher import ZhihuPlaywrightPublisher
 from scheduler import TaskScheduler
 from utils import get_logger, setup_logging, BatchProgress, PaperProgress, print_header, get_output_handler, get_log_level
+from utils.exceptions import APIError, APIKeyError, ZhihuLoginError, ZhihuCookieError, ZhihuPublishError
 
 logger = get_logger()
 
@@ -38,6 +39,7 @@ class ArxivSurveySystem:
         Args:
             config_path: 配置文件路径，None则使用环境变量
         """
+        global output_handler
         # 设置日志
         setup_logging()
         
@@ -47,7 +49,6 @@ class ArxivSurveySystem:
             # 初始化输出处理器
             core_config = self.config.output.get_module_config("core")
             log_level = get_log_level(core_config.log_level)
-            global output_handler
             output_handler = get_output_handler(
                 "core", 
                 logger, 
@@ -63,7 +64,6 @@ class ArxivSurveySystem:
             # 初始化输出处理器
             core_config = self.config.output.get_module_config("core")
             log_level = get_log_level(core_config.log_level)
-            global output_handler
             output_handler = get_output_handler(
                 "core", 
                 logger, 
@@ -75,6 +75,7 @@ class ArxivSurveySystem:
     
     def _apply_env_overrides(self):
         """应用环境变量覆盖配置"""
+        global output_handler
         import os
         
         # 知乎配置覆盖
@@ -109,11 +110,36 @@ class ArxivSurveySystem:
     def _check_zhihu_login(self):
         """
         检查知乎登录状态
+        
+        Returns:
+            bool: 登录是否成功
         """
-        if self.publisher.check_login():
-            output_handler.info("知乎登录成功，可以发布")
-        else:
-            output_handler.warning("知乎登录失败，发布功能可能无法使用")
+        global output_handler
+        try:
+            if self.publisher.check_login():
+                output_handler.info("知乎登录成功，可以发布")
+                return True
+            else:
+                output_handler.warning("知乎登录失败，发布功能可能无法使用")
+                # 禁用知乎发布功能
+                self.config.zhihu.enabled = False
+                output_handler.info("已自动禁用知乎发布功能")
+                return False
+        except ZhihuCookieError as e:
+            output_handler.error(f"知乎Cookie无效: {e}")
+            output_handler.info("已自动禁用知乎发布功能")
+            self.config.zhihu.enabled = False
+            return False
+        except ZhihuLoginError as e:
+            output_handler.error(f"知乎登录检查失败: {e}")
+            output_handler.info("已自动禁用知乎发布功能")
+            self.config.zhihu.enabled = False
+            return False
+        except Exception as e:
+            output_handler.error(f"检查知乎登录状态时出错: {e}")
+            output_handler.info("已自动禁用知乎发布功能")
+            self.config.zhihu.enabled = False
+            return False
     
     def run_once(self) -> ProcessingResult:
         """
@@ -122,6 +148,7 @@ class ArxivSurveySystem:
         Returns:
             处理结果
         """
+        global output_handler
         print_header("ArXiv 文献自动总结系统 - 单次运行")
         output_handler.info("=" * 60)
         output_handler.info("启动ArXiv文献自动总结系统 - 单次运行")
@@ -167,6 +194,14 @@ class ArxivSurveySystem:
             try:
                 self._execute_task_with_progress(task, batch_progress)
                 batch_progress.mark_success()
+            except APIKeyError as e:
+                # API密钥错误，终止整个处理流程
+                output_handler.error(f"处理论文 {paper.arxiv_id} 时出错: {e}")
+                output_handler.error("API密钥无效，终止处理流程")
+                task.update_status(TaskStatus.FAILED, str(e))
+                batch_progress.mark_failed()
+                # 终止后续处理
+                break
             except Exception as e:
                 output_handler.error(f"处理论文 {paper.arxiv_id} 时出错: {e}")
                 task.update_status(TaskStatus.FAILED, str(e))
@@ -190,6 +225,7 @@ class ArxivSurveySystem:
     
     def run_continuous(self):
         """持续运行，按配置定时执行"""
+        global output_handler
         if not self.config.scheduler.enabled:
             output_handler.warning("配置中禁用了调度器")
             return
@@ -222,6 +258,7 @@ class ArxivSurveySystem:
         Returns:
             处理任务
         """
+        global output_handler
         output_handler.info(f"处理单篇论文: {arxiv_id}")
         
         # 获取论文信息
@@ -259,6 +296,7 @@ class ArxivSurveySystem:
         Returns:
             更新后的任务
         """
+        global output_handler
         paper = task.paper
         if not paper:
             task.update_status(TaskStatus.FAILED, "Paper info is missing")
@@ -304,12 +342,29 @@ class ArxivSurveySystem:
                 output_handler.info(f"[{paper.arxiv_id}] 步骤 5/5: 发布到知乎...")
                 task.update_status(TaskStatus.PUBLISHING)
                 
-                zhihu_url = self.publisher.publish(summary, paper)
-                if zhihu_url:
-                    task.zhihu_url = zhihu_url
-                    output_handler.info(f"[{paper.arxiv_id}] 已发布到知乎: {zhihu_url}")
-                else:
-                    output_handler.warning(f"[{paper.arxiv_id}] 发布到知乎失败")
+                try:
+                    zhihu_url = self.publisher.publish(summary, paper)
+                    if zhihu_url:
+                        task.zhihu_url = zhihu_url
+                        output_handler.info(f"[{paper.arxiv_id}] 已发布到知乎: {zhihu_url}")
+                    else:
+                        output_handler.warning(f"[{paper.arxiv_id}] 发布到知乎失败")
+                except ZhihuCookieError as e:
+                    output_handler.error(f"[{paper.arxiv_id}] 知乎Cookie无效: {e}")
+                    output_handler.info("已自动禁用知乎发布功能，后续论文将只保存到本地")
+                    self.config.zhihu.enabled = False
+                    # 任务仍然算成功，因为总结已完成并保存
+                    output_handler.info(f"[{paper.arxiv_id}] 论文已保存到本地，跳过知乎发布")
+                except ZhihuLoginError as e:
+                    output_handler.error(f"[{paper.arxiv_id}] 知乎登录失败: {e}")
+                    output_handler.info("已自动禁用知乎发布功能，后续论文将只保存到本地")
+                    self.config.zhihu.enabled = False
+                    # 任务仍然算成功，因为总结已完成并保存
+                    output_handler.info(f"[{paper.arxiv_id}] 论文已保存到本地，跳过知乎发布")
+                except ZhihuPublishError as e:
+                    output_handler.error(f"[{paper.arxiv_id}] 知乎发布失败: {e}")
+                    # 发布失败不影响任务完成，因为总结已保存
+                    output_handler.info(f"[{paper.arxiv_id}] 论文已保存到本地，知乎发布失败")
             else:
                 output_handler.info(f"[{paper.arxiv_id}] 步骤 5/5: 知乎发布已禁用")
             
@@ -321,6 +376,19 @@ class ArxivSurveySystem:
             if pdf_path.exists():
                 pdf_path.unlink()
             
+        except APIKeyError as e:
+            # API密钥错误，终止整个处理流程
+            error_msg = f"[{paper.arxiv_id}] AI API密钥错误: {e}"
+            output_handler.error(error_msg)
+            output_handler.error("API密钥无效，请检查配置后重新运行")
+            task.update_status(TaskStatus.FAILED, str(e))
+            # 重新抛出异常，让上层处理
+            raise
+        except APIError as e:
+            # 其他API错误
+            error_msg = f"[{paper.arxiv_id}] AI API错误: {e}"
+            output_handler.error(error_msg)
+            task.update_status(TaskStatus.FAILED, str(e))
         except Exception as e:
             output_handler.error(f"[{paper.arxiv_id}] 任务失败: {e}")
             task.update_status(TaskStatus.FAILED, str(e))
@@ -338,6 +406,7 @@ class ArxivSurveySystem:
         Returns:
             更新后的任务
         """
+        global output_handler
         paper = task.paper
         if not paper:
             task.update_status(TaskStatus.FAILED, "Paper info is missing")
@@ -391,12 +460,29 @@ class ArxivSurveySystem:
                 progress.start_step(5, "发布知乎")
                 task.update_status(TaskStatus.PUBLISHING)
                 
-                zhihu_url = self.publisher.publish(summary, paper)
-                if zhihu_url:
-                    task.zhihu_url = zhihu_url
-                    progress.complete_step(f"已发布到知乎: {zhihu_url}")
-                else:
-                    progress.warning("发布到知乎失败")
+                try:
+                    zhihu_url = self.publisher.publish(summary, paper)
+                    if zhihu_url:
+                        task.zhihu_url = zhihu_url
+                        progress.complete_step(f"已发布到知乎: {zhihu_url}")
+                    else:
+                        progress.warning("发布到知乎失败")
+                except ZhihuCookieError as e:
+                    progress.error(f"知乎Cookie无效: {e}")
+                    output_handler.error(f"[{paper.arxiv_id}] 知乎Cookie无效: {e}")
+                    output_handler.info("已自动禁用知乎发布功能，后续论文将只保存到本地")
+                    self.config.zhihu.enabled = False
+                    progress.info("论文已保存到本地，跳过知乎发布")
+                except ZhihuLoginError as e:
+                    progress.error(f"知乎登录失败: {e}")
+                    output_handler.error(f"[{paper.arxiv_id}] 知乎登录失败: {e}")
+                    output_handler.info("已自动禁用知乎发布功能，后续论文将只保存到本地")
+                    self.config.zhihu.enabled = False
+                    progress.info("论文已保存到本地，跳过知乎发布")
+                except ZhihuPublishError as e:
+                    progress.error(f"知乎发布失败: {e}")
+                    output_handler.error(f"[{paper.arxiv_id}] 知乎发布失败: {e}")
+                    progress.info("论文已保存到本地，知乎发布失败")
             else:
                 progress.info("知乎发布已禁用")
             
@@ -408,6 +494,21 @@ class ArxivSurveySystem:
             if pdf_path.exists():
                 pdf_path.unlink()
             
+        except APIKeyError as e:
+            # API密钥错误，终止整个处理流程
+            error_msg = f"[{paper.arxiv_id}] AI API密钥错误: {e}"
+            progress.error(f"API密钥错误: {e}")
+            output_handler.error(error_msg)
+            output_handler.error("API密钥无效，请检查配置后重新运行")
+            task.update_status(TaskStatus.FAILED, str(e))
+            # 重新抛出异常，让上层处理
+            raise
+        except APIError as e:
+            # 其他API错误
+            error_msg = f"[{paper.arxiv_id}] AI API错误: {e}"
+            progress.error(f"AI API错误: {e}")
+            output_handler.error(error_msg)
+            task.update_status(TaskStatus.FAILED, str(e))
         except Exception as e:
             progress.error(f"任务失败: {e}")
             output_handler.error(f"[{paper.arxiv_id}] 任务失败: {e}")

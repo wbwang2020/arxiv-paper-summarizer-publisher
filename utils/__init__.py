@@ -2,6 +2,17 @@ from .logger import get_logger, setup_logging
 from .helpers import sanitize_filename, truncate_text, chunk_text, estimate_tokens
 from .progress import ProgressBar, PaperProgress, BatchProgress, progress_spinner, print_header, print_section
 from .output_handler import OutputHandler, get_output_handler, setup_output_handler
+from .exceptions import (
+    ArxivSurveyError,
+    APIError,
+    APIKeyError,
+    APITimeoutError,
+    APIRateLimitError,
+    ZhihuLoginError,
+    ZhihuCookieError,
+    ZhihuPublishError,
+    ConfigurationError,
+)
 
 # 日志级别映射
 LOG_LEVEL_MAP = {
@@ -44,4 +55,13 @@ __all__ = [
     "setup_output_handler",
     "get_log_level",
     "LOG_LEVEL_MAP",
+    "ArxivSurveyError",
+    "APIError",
+    "APIKeyError",
+    "APITimeoutError",
+    "APIRateLimitError",
+    "ZhihuLoginError",
+    "ZhihuCookieError",
+    "ZhihuPublishError",
+    "ConfigurationError",
 ]

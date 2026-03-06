@@ -21,6 +21,7 @@ from config import ZhihuConfig, StorageConfig, Config
 from models import ArxivPaper, PaperSummary
 from storage.storage import PaperStorage
 from utils import get_logger, get_output_handler, get_log_level
+from utils.exceptions import ZhihuLoginError, ZhihuCookieError, ZhihuPublishError
 
 # 导入子模块
 from publisher.zhihu_modules import TitleSettingsHandler, PublishSettingsHandler, ContentFiller
@@ -236,12 +237,19 @@ class ZhihuPlaywrightPublisher:
         self.publish_settings_handler = None
         self.content_filler = None
     
-    def check_login(self) -> bool:
+    def check_login(self, raise_on_failure: bool = False) -> bool:
         """
         检查登录状态
         
+        Args:
+            raise_on_failure: 登录失败时是否抛出异常
+            
         Returns:
             是否已登录
+            
+        Raises:
+            ZhihuCookieError: 当cookie无效且raise_on_failure为True时
+            ZhihuLoginError: 当登录检查失败且raise_on_failure为True时
         """
         try:
             self._init_browser(headless=True)
@@ -263,20 +271,37 @@ class ZhihuPlaywrightPublisher:
             if is_logged_in:
                 logger.info("登录检查通过")
                 self._debug_print("[成功] 知乎登录状态正常")
+                return True
             else:
                 logger.warning("登录检查失败 - 未找到用户元素")
                 self._debug_print("[错误] 知乎登录状态异常")
+                
+                # 检查是否有登录按钮，确认是未登录状态
+                login_buttons = self.page.query_selector_all('a[href*="login"], button:has-text("登录"), .Button--primary')
+                if len(login_buttons) > 0:
+                    error_msg = "知乎Cookie无效或已过期，请更新Cookie"
+                    self._debug_print(f"[错误] {error_msg}")
+                    if raise_on_failure:
+                        raise ZhihuCookieError(error_msg)
+                else:
+                    error_msg = "无法确认知乎登录状态，页面结构可能已更改"
+                    self._debug_print(f"[错误] {error_msg}")
+                    if raise_on_failure:
+                        raise ZhihuLoginError(error_msg)
+                
+                return False
             
-            self._debug_print(f"页面标题: {self.page.title()}")
-            
-            return is_logged_in
-            
+        except ZhihuLoginError:
+            raise
         except Exception as e:
             logger.error(f"检查登录状态时出错: {e}")
             self._debug_print(f"[错误] 测试登录状态失败: {e}")
             self._debug_screenshot("debug_login_error.png")
             import traceback
             traceback.print_exc()
+            
+            if raise_on_failure:
+                raise ZhihuLoginError(f"检查登录状态时出错: {e}")
             return False
         finally:
             self._close_browser()
@@ -728,7 +753,8 @@ class ZhihuPlaywrightPublisher:
         summary: PaperSummary,
         paper: ArxivPaper,
         as_draft: Optional[bool] = None,
-        headless: bool = True
+        headless: bool = True,
+        check_login_first: bool = True
     ) -> Optional[str]:
         """
         发布文章到知乎
@@ -738,17 +764,36 @@ class ZhihuPlaywrightPublisher:
             paper: 论文信息
             as_draft: 是否保存为草稿
             headless: 是否无头模式
+            check_login_first: 发布前是否先检查登录状态
             
         Returns:
             知乎文章URL，失败返回None
+            
+        Raises:
+            ZhihuLoginError: 当登录检查失败且check_login_first为True时
+            ZhihuPublishError: 当发布过程中出现错误时
         """
         if not self.config.enabled:
             logger.info("知乎发布器已禁用")
             return None
         
         if not self.cookie:
-            logger.error("知乎cookie未配置")
-            return None
+            error_msg = "知乎cookie未配置"
+            logger.error(error_msg)
+            raise ZhihuCookieError(error_msg)
+        
+        # 首先检查登录状态
+        if check_login_first:
+            logger.info("检查知乎登录状态...")
+            self.output_handler.info("检查知乎登录状态...")
+            try:
+                self.check_login(raise_on_failure=True)
+            except ZhihuLoginError:
+                raise
+            except Exception as e:
+                error_msg = f"检查登录状态时出错: {e}"
+                logger.error(error_msg)
+                raise ZhihuLoginError(error_msg)
         
         as_draft = as_draft if as_draft is not None else self.config.draft_first
         
@@ -782,16 +827,23 @@ class ZhihuPlaywrightPublisher:
                 else:
                     self._debug_print("[警告] 发布状态更新失败")
             else:
-                logger.warning("文章发布失败 - 未返回URL")
-                self._debug_print("[错误] 文章发布失败")
+                error_msg = "文章发布失败 - 未返回URL"
+                logger.warning(error_msg)
+                self._debug_print(f"[错误] {error_msg}")
+                raise ZhihuPublishError(error_msg)
             
             return article_url
             
+        except ZhihuLoginError:
+            raise
+        except ZhihuPublishError:
+            raise
         except Exception as e:
-            logger.error(f"发布到知乎时出错: {e}")
+            error_msg = f"发布到知乎时出错: {e}"
+            logger.error(error_msg)
             import traceback
             traceback.print_exc()
-            return None
+            raise ZhihuPublishError(error_msg)
         finally:
             self._close_browser()
     
