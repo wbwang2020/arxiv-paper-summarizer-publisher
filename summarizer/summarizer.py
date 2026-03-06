@@ -4,11 +4,13 @@ from typing import Optional
 
 import requests
 
-from config import AIConfig
+from config import AIConfig, Config
 from models import ArxivPaper, PaperSummary, FigureTableInfo, ReferenceInfo
-from utils import get_logger, chunk_text, estimate_tokens
+from utils import get_logger, chunk_text, estimate_tokens, get_output_handler, get_log_level
 
 logger = get_logger()
+
+output_handler = None  # 延迟初始化
 
 
 class PaperSummarizer:
@@ -21,8 +23,27 @@ class PaperSummarizer:
         self.prompt_template = config.prompt_template
         self.section_mappings = self._build_section_mappings()
         
+        # 初始化输出处理器
+        global output_handler
+        if output_handler is None:
+            # 加载配置以获取输出设置
+            try:
+                full_config = Config.from_yaml("config/config.yaml")
+                summarizer_config = full_config.output.get_module_config("summarizer")
+                log_level = get_log_level(summarizer_config.log_level)
+                output_handler = get_output_handler(
+                    "summarizer", 
+                    logger, 
+                    debug=summarizer_config.debug, 
+                    log_level=log_level, 
+                    enable_debug=summarizer_config.enable_debug
+                )
+            except Exception as e:
+                # 如果加载失败，使用默认设置
+                output_handler = get_output_handler("summarizer", logger)
+        
         if not self.api_key:
-            logger.warning("AI API密钥未配置")
+            output_handler.warning("AI API密钥未配置")
     
     def _build_section_mappings(self) -> dict:
         """
@@ -73,7 +94,7 @@ class PaperSummarizer:
         summary.ai_model = self.config.model
         summary.processing_time = time.time() - start_time
         
-        logger.info(f"总结论文 {paper.arxiv_id} 完成，耗时 {summary.processing_time:.2f}秒")
+        output_handler.info(f"总结论文 {paper.arxiv_id} 完成，耗时 {summary.processing_time:.2f}秒")
         
         return summary
     
@@ -99,7 +120,7 @@ class PaperSummarizer:
         max_content_length = available_tokens * 3
         
         if len(content) > max_content_length:
-            logger.warning(f"论文内容过长 ({len(content)} 字符)，截断到 {max_content_length} (约{available_tokens} tokens)")
+            output_handler.warning(f"论文内容过长 ({len(content)} 字符)，截断到 {max_content_length} (约{available_tokens} tokens)")
             content = content[:max_content_length] + "\n\n[内容已截断...]"
         
         return self.prompt_template.format(
@@ -117,10 +138,10 @@ class PaperSummarizer:
             try:
                 return self._call_api(prompt)
             except Exception as e:
-                logger.warning(f"API调用失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                output_handler.warning(f"API调用失败 (尝试 {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt  # 指数退避
-                    logger.info(f"{wait_time} 秒后重试...")
+                    output_handler.info(f"{wait_time} 秒后重试...")
                     time.sleep(wait_time)
                 else:
                     raise
@@ -147,8 +168,8 @@ class PaperSummarizer:
             "max_tokens": self.config.max_tokens
         }
         
-        logger.info(f"使用模型 {self.config.model} 调用AI API")
-        logger.debug(f"API URL: {self.config.api_url}")
+        output_handler.info(f"使用模型 {self.config.model} 调用AI API")
+        output_handler.debug_print(f"API URL: {self.config.api_url}")
         
         try:
             response = requests.post(
@@ -158,25 +179,25 @@ class PaperSummarizer:
                 timeout=self.config.timeout
             )
             
-            logger.info(f"API响应状态: {response.status_code}")
+            output_handler.info(f"API响应状态: {response.status_code}")
             
             if response.status_code != 200:
-                logger.error(f"API错误: {response.text}")
+                output_handler.error(f"API错误: {response.text}")
                 response.raise_for_status()
             
             result = response.json()
-            logger.debug(f"API响应: {result}")
+            output_handler.debug_print(f"API响应: {result}")
             
             content = result["choices"][0]["message"]["content"]
-            logger.info(f"收到AI API响应")
+            output_handler.info(f"收到AI API响应")
             
             return content
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"API请求失败: {e}")
+            output_handler.error(f"API请求失败: {e}")
             raise
         except (KeyError, IndexError) as e:
-            logger.error(f"解析API响应失败: {e}")
+            output_handler.error(f"解析API响应失败: {e}")
             raise
     
     def _parse_response(self, response: str, paper: ArxivPaper) -> PaperSummary:

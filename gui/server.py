@@ -24,9 +24,16 @@ BASE_DIR = GUI_DIR.parent
 app = Flask(__name__, static_folder=str(GUI_DIR), static_url_path='')
 CORS(app)
 
+# 禁用debug模式
+app.debug = False
+
 # 配置路径
 CONFIG_PATH = BASE_DIR / "config" / "config.yaml"
 PAPERS_DIR = BASE_DIR / "papers"
+
+# 全局状态变量
+current_process = None
+is_processing = False
 
 
 def check_single_instance(port=5000):
@@ -50,6 +57,12 @@ def index():
 @app.route('/api/run', methods=['POST'])
 def run_main():
     """执行main.py命令"""
+    global current_process, is_processing
+    
+    # 检查是否已有进程在运行
+    if is_processing:
+        return jsonify({'error': '处理任务已在运行中，请等待完成后再启动新任务'}), 400
+    
     data = request.json
     args = data.get('args', [])
     
@@ -60,9 +73,14 @@ def run_main():
         # 设置环境变量，确保UTF-8编码
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
+        env['LANG'] = 'en_US.UTF-8'
+        env['LC_ALL'] = 'en_US.UTF-8'
+        
+        # 标记为处理中
+        is_processing = True
         
         # 启动进程
-        process = subprocess.Popen(
+        current_process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -70,17 +88,27 @@ def run_main():
             encoding='utf-8',
             errors='replace',
             cwd=str(BASE_DIR),
-            env=env
+            env=env,
+            bufsize=0  # 禁用缓冲，确保实时输出
         )
         
         def generate():
-            for line in process.stdout:
-                yield line
-            process.wait()
+            global is_processing, current_process
+            try:
+                for line in current_process.stdout:
+                    yield line
+                current_process.wait()
+            finally:
+                # 处理完成，重置状态
+                is_processing = False
+                current_process = None
         
         return Response(generate(), mimetype='text/plain')
     
     except Exception as e:
+        # 发生错误，重置状态
+        is_processing = False
+        current_process = None
         return jsonify({'error': str(e)}), 500
 
 
@@ -268,18 +296,84 @@ def check_zhihu():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """获取处理状态"""
+    global is_processing, current_process
+    return jsonify({
+        'is_processing': is_processing,
+        'has_process': current_process is not None
+    })
+
+
+@app.route('/api/stop', methods=['POST'])
+def stop_process():
+    """停止当前处理进程"""
+    global current_process, is_processing
+    
+    if not current_process:
+        return jsonify({'error': '没有正在运行的处理进程'}), 400
+    
+    try:
+        # 发送终止信号
+        current_process.terminate()
+        # 等待进程结束
+        current_process.wait(timeout=10)
+        # 重置状态
+        is_processing = False
+        current_process = None
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/config/output', methods=['GET', 'POST'])
+def handle_output_config():
+    """输出配置管理"""
+    if request.method == 'GET':
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            return jsonify(config.get('output', {}))
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    else:  # POST
+        try:
+            output_config = request.json
+            
+            # 读取现有配置
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f) or {}
+            
+            # 更新输出配置
+            config['output'] = output_config
+            
+            # 保存配置
+            with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+                yaml.dump(config, f, allow_unicode=True, sort_keys=False)
+            
+            return jsonify({'status': 'ok'})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
-    # 检查是否已有实例在运行
+    print("启动ArXiv文献自动总结系统GUI服务器...")
+    print(f"基础目录：{BASE_DIR}")
+    print(f"配置路径：{CONFIG_PATH}")
+    print(f"论文目录：{PAPERS_DIR}")
+    print(f"调试模式：{app.debug}")
+    print(f"端口设置：5000")
+    print("\n访问GUI界面：http://localhost:5000")
+    print("按Ctrl+C停止服务器\n")
+    
+    # 检查单实例
     if not check_single_instance(port=5000):
         print("错误：GUI服务器已经在运行（端口5000被占用）")
         print("请关闭已运行的实例后再启动")
         sys.exit(1)
     
-    print("启动ArXiv文献自动总结系统GUI服务器...")
-    print(f"基础目录：{BASE_DIR}")
-    print(f"配置路径：{CONFIG_PATH}")
-    print(f"论文目录：{PAPERS_DIR}")
-    print("\n访问GUI界面：http://localhost:5000")
-    print("按Ctrl+C停止服务器\n")
-    
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # 明确禁用debug模式并设置端口为5000
+    print("正在启动服务器...")
+    app.run(debug=False, host='0.0.0.0', port=5000)

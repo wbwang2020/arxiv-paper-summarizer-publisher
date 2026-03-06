@@ -21,7 +21,7 @@
 +--------------------------------------------------+
 |  ArXiv文献自动总结系统                [刷新状态]  |
 +--------------------------------------------------+
-|  [运行控制]  [配置管理]  [论文列表]  [系统状态]   |
+|  [运行控制]  [配置管理]  [输出配置]  [论文列表]  [系统状态]   |
 +--------------------------------------------------+
 |                                                  |
 |              主内容区域                          |
@@ -35,8 +35,9 @@
 单页应用，通过Tab切换不同功能区域：
 1. **运行控制**：执行各种运行模式
 2. **配置管理**：编辑config.yaml
-3. **论文列表**：显示brief.json中的论文信息
-4. **系统状态**：显示系统状态和日志
+3. **输出配置**：配置各模块的输出参数
+4. **论文列表**：显示brief.json中的论文信息
+5. **系统状态**：显示系统状态和日志
 
 ## 3. 功能模块设计
 
@@ -217,7 +218,58 @@
 - 章节定义支持增删改查，可调整顺序
 - 字段类型支持文本（string）和列表（list）两种
 
-### 3.3 论文列表模块
+### 3.3 输出配置模块
+
+#### 界面元素
+```
++--------------------------------------------------+
+|  输出配置                                         |
++--------------------------------------------------+
+|  [模块输出配置]                                   |
++--------------------------------------------------+
+|                                                  |
+|  模块输出配置:                                    |
+|  +----------------------------------------------+|
+|  | 模块 | 调试模式 | 日志级别 | 启用调试输出    ||
+|  |------|----------|----------|----------------||
+|  | main | [x]      | [INFO ▼] | [ ]            ||
+|  | core | [ ]      | [INFO ▼] | [ ]            ||
+|  | scanner | [ ]   | [INFO ▼] | [ ]            ||
+|  | summarizer | [ ]| [INFO ▼] | [ ]            ||
+|  | storage | [ ]   | [INFO ▼] | [ ]            ||
+|  | publisher | [x] | [INFO ▼] | [x]            ||
+|  | scheduler | [ ] | [INFO ▼] | [ ]            ||
+|  +----------------------------------------------+|
+|                                                  |
+|  [保存配置]  [重置为默认]                         |
+|                                                  |
++--------------------------------------------------+
+```
+
+#### 配置参数
+
+**模块输出配置**
+- **调试模式**：开启/关闭调试输出
+- **日志级别**：选择日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
+- **启用调试输出**：开启/关闭调试输出
+
+#### 支持的模块
+- **main**：主模块
+- **core**：核心系统模块
+- **scanner**：论文扫描器
+- **summarizer**：AI总结器
+- **storage**：存储管理
+- **publisher**：知乎发布器
+- **scheduler**：任务调度器
+
+#### 交互逻辑
+- 读取现有config.yaml中的output配置，填充到表格
+- 为每个模块单独设置输出参数
+- 支持批量修改相同类型的配置
+- 点击"保存配置"将修改写入config.yaml
+- 点击"重置为默认"恢复默认配置
+
+### 3.4 论文列表模块
 
 #### 界面元素
 ```
@@ -385,6 +437,21 @@ async function updateSummarySections(sections) {
         body: JSON.stringify({summary_sections: sections})
     });
 }
+
+// 保存输出配置
+async function saveOutputConfig(outputConfig) {
+    await fetch('/api/config/output', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(outputConfig)
+    });
+}
+
+// 加载输出配置
+async function loadOutputConfig() {
+    const response = await fetch('/api/config/output');
+    return await response.json();
+}
 ```
 
 #### 读取brief.json
@@ -469,6 +536,22 @@ def summary_sections():
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
         return {'status': 'ok'}
 
+@app.route('/api/config/output', methods=['GET', 'POST'])
+def output_config():
+    """输出配置管理"""
+    if request.method == 'GET':
+        with open('config/config.yaml', 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+            return config.get('output', {})
+    else:
+        output_config = request.json
+        with open('config/config.yaml', 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        config['output'] = output_config
+        with open('config/config.yaml', 'w', encoding='utf-8') as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+        return {'status': 'ok'}
+
 @app.route('/api/papers', methods=['GET'])
 def get_papers():
     papers = []
@@ -534,6 +617,7 @@ python main.py --gui
 2. 实现运行控制模块（调用main.py）
 3. 实现配置管理模块（读写config.yaml）
 4. **实现AI配置模块（支持提示词和章节定义编辑）**
+5. **实现输出配置模块（支持各模块输出参数配置）**
 
 ### 第二阶段：数据展示
 1. 实现论文列表模块（读取brief.json）
@@ -545,6 +629,7 @@ python main.py --gui
 2. 优化用户体验（加载状态、错误提示等）
 3. 添加操作历史记录
 4. **添加章节定义可视化编辑功能**
+5. **添加输出配置可视化管理功能**
 
 ## 8. 注意事项
 
@@ -588,6 +673,59 @@ summary_sections:
 - 旧版本配置文件仍然兼容
 - 新增配置项有默认值，不强制要求配置
 - 章节定义为空时，summarizer使用默认行为
+
+### v1.6.0 配置更新（2026-03-06）
+
+#### 新增配置项
+1. **输出配置**
+   - `output`: 输出配置（对象）
+     - `modules`: 各模块的输出配置（对象）
+
+#### 模块输出配置结构
+```yaml
+output:
+  modules:
+    main: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    core: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    scanner: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    summarizer: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    storage: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    publisher: 
+      debug: true
+      log_level: INFO
+      enable_debug: true
+    scheduler: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+```
+
+#### GUI适配
+- 添加新的"输出配置"标签页
+- 支持表格形式展示各模块的输出配置
+- 为每个模块单独设置调试模式、日志级别和启用调试输出
+- 支持批量修改相同类型的配置
+- 支持重置为默认配置
+
+#### 向后兼容
+- 旧版本配置文件仍然兼容
+- 新增配置项有默认值，不强制要求配置
+- 模块输出配置为空时，使用默认行为
 
 ## 10. 总结
 
@@ -688,3 +826,7 @@ logger.error("发布文章失败")
 - ✅ 实时日志输出
 - ✅ 单实例运行约束
 - ✅ 全中文日志输出
+- ✅ 模块化输出配置管理
+- ✅ 各模块独立的输出参数设置
+- ✅ 可视化的输出配置界面
+- ✅ 支持批量修改输出配置

@@ -5,11 +5,13 @@ import time
 import arxiv
 import requests
 
-from config import ArxivConfig
+from config import ArxivConfig, Config
 from models import ArxivPaper
-from utils import get_logger
+from utils import get_logger, get_output_handler, get_log_level
 
 logger = get_logger()
+
+output_handler = None  # 延迟初始化
 
 
 class ArxivScanner:
@@ -22,6 +24,25 @@ class ArxivScanner:
             delay_seconds=3,
             num_retries=3
         )
+        
+        # 初始化输出处理器
+        global output_handler
+        if output_handler is None:
+            # 加载配置以获取输出设置
+            try:
+                full_config = Config.from_yaml("config/config.yaml")
+                scanner_config = full_config.output.get_module_config("scanner")
+                log_level = get_log_level(scanner_config.log_level)
+                output_handler = get_output_handler(
+                    "scanner", 
+                    logger, 
+                    debug=scanner_config.debug, 
+                    log_level=log_level, 
+                    enable_debug=scanner_config.enable_debug
+                )
+            except Exception as e:
+                # 如果加载失败，使用默认设置
+                output_handler = get_output_handler("scanner", logger)
     
     def _build_query(self, keywords: Optional[List[str]] = None, 
                      categories: Optional[List[str]] = None) -> str:
@@ -118,8 +139,8 @@ class ArxivScanner:
         query = self._build_query(keywords, categories)
         max_results = max_results or self.config.max_results
         
-        logger.info(f"使用查询语句搜索arXiv: {query}")
-        logger.info(f"最大结果数: {max_results}")
+        output_handler.info(f"使用查询语句搜索arXiv: {query}")
+        output_handler.info(f"最大结果数: {max_results}")
         
         search = arxiv.Search(
             query=query,
@@ -152,13 +173,13 @@ class ArxivScanner:
                             continue
                 
                 papers.append(paper)
-                logger.debug(f"找到论文: {paper.arxiv_id} - {paper.title[:50]}...")
+                output_handler.debug_print(f"找到论文: {paper.arxiv_id} - {paper.title[:50]}...")
                 
         except Exception as e:
-            logger.error(f"搜索arXiv时出错: {e}")
+            output_handler.error(f"搜索arXiv时出错: {e}")
             raise
         
-        logger.info(f"找到 {len(papers)} 篇论文")
+        output_handler.info(f"找到 {len(papers)} 篇论文")
         return papers
     
     def search_recent_papers(self, days: Optional[int] = None) -> List[ArxivPaper]:
@@ -174,7 +195,7 @@ class ArxivScanner:
         days = days or self.config.days_back
         date_from = datetime.now() - timedelta(days=days)
         
-        logger.info(f"搜索最近 {days} 天的论文 (自 {date_from.date()} 起)")
+        output_handler.info(f"搜索最近 {days} 天的论文 (自 {date_from.date()} 起)")
         
         return self.search_papers(date_from=date_from)
     
@@ -198,7 +219,7 @@ class ArxivScanner:
             if results:
                 return self._result_to_paper(results[0])
         except Exception as e:
-            logger.error(f"获取论文 {arxiv_id} 时出错: {e}")
+            output_handler.error(f"获取论文 {arxiv_id} 时出错: {e}")
         
         return None
     
@@ -216,7 +237,7 @@ class ArxivScanner:
             是否成功
         """
         try:
-            logger.info(f"正在下载 {paper.arxiv_id} 的PDF")
+            output_handler.info(f"正在下载 {paper.arxiv_id} 的PDF")
             
             response = requests.get(paper.pdf_url, timeout=timeout, stream=True)
             response.raise_for_status()
@@ -225,9 +246,9 @@ class ArxivScanner:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             
-            logger.info(f"PDF已保存到 {save_path}")
+            output_handler.info(f"PDF已保存到 {save_path}")
             return True
             
         except Exception as e:
-            logger.error(f"下载PDF时出错: {e}")
+            output_handler.error(f"下载PDF时出错: {e}")
             return False

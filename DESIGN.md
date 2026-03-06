@@ -1400,16 +1400,179 @@ class PaperProgress:
         pass
 ```
 
-### 3.10 GUI模块 (gui/)
+### 3.10 输出处理模块 (utils/output_handler.py)
 
-#### 3.10.1 设计原则
+#### 3.10.1 设计目标
+- **统一输出**：统一各模块的输出方式，支持同时输出到终端和GUI界面
+- **模块化配置**：为每个模块提供独立的输出配置，支持不同级别日志输出控制
+- **配置驱动**：输出配置从config.yaml文件加载，支持动态更新
+- **灵活性**：支持Logger和Debug两种输出方式
+
+#### 3.10.2 接口定义
+```python
+class OutputHandler:
+    """统一输出处理器"""
+
+    def __init__(self, module_id: str, logger: Optional[logging.Logger] = None, debug: bool = False, 
+                 log_level: int = logging.INFO, enable_debug: bool = False):
+        """
+        初始化输出处理器
+
+        Args:
+            module_id: 模块ID，用于识别不同模块
+            logger: 日志记录器实例
+            debug: 是否开启调试模式
+            log_level: 日志级别
+            enable_debug: 是否启用调试输出
+        """
+        pass
+
+    def info(self, message: str):
+        """输出信息级别消息"""
+        pass
+
+    def debug(self, message: str):
+        """输出调试级别消息"""
+        pass
+
+    def warning(self, message: str):
+        """输出警告级别消息"""
+        pass
+
+    def error(self, message: str):
+        """输出错误级别消息"""
+        pass
+
+def get_output_handler(module_id: str, logger: Optional[logging.Logger] = None, 
+                      debug: bool = False, log_level: int = logging.INFO, 
+                      enable_debug: bool = False) -> OutputHandler:
+    """
+    创建或获取输出处理器实例
+
+    Args:
+        module_id: 模块ID
+        logger: 日志记录器实例
+        debug: 是否开启调试模式
+        log_level: 日志级别
+        enable_debug: 是否启用调试输出
+
+    Returns:
+        OutputHandler实例
+    """
+    pass
+
+def update_module_config(module_id: str, config: Dict[str, Any]):
+    """
+    更新模块的输出配置
+
+    Args:
+        module_id: 模块ID
+        config: 配置字典，包含debug、log_level、enable_debug等
+    """
+    pass
+```
+
+#### 3.10.3 配置结构
+```yaml
+# config.yaml 中的输出配置
+output:
+  modules:
+    main: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    core: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    scanner: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    summarizer: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    storage: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    publisher: 
+      debug: true
+      log_level: INFO
+      enable_debug: true
+    scheduler: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+```
+
+#### 3.10.4 配置类定义
+```python
+class ModuleOutputConfig(BaseModel):
+    """模块输出配置"""
+    debug: bool = Field(default=False, description="是否开启调试模式")
+    log_level: str = Field(default="INFO", description="日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL")
+    enable_debug: bool = Field(default=False, description="是否启用调试输出")
+
+
+class OutputConfig(BaseModel):
+    """输出配置"""
+    modules: Dict[str, ModuleOutputConfig] = Field(default_factory=dict, description="各模块的输出配置")
+    
+    def get_module_config(self, module_id: str) -> ModuleOutputConfig:
+        """获取模块的输出配置"""
+        return self.modules.get(module_id, ModuleOutputConfig())
+
+
+class Config(BaseModel):
+    """主配置类"""
+    arxiv: ArxivConfig = Field(default_factory=ArxivConfig)
+    ai: AIConfig = Field(default_factory=AIConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
+    zhihu: ZhihuConfig = Field(default_factory=ZhihuConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    output: OutputConfig = Field(default_factory=OutputConfig)
+```
+
+#### 3.10.5 使用示例
+```python
+# 初始化输出处理器
+from utils import get_output_handler, get_log_level
+
+# 加载配置
+config = Config.from_yaml("config/config.yaml")
+module_config = config.output.get_module_config("scanner")
+
+# 转换日志级别
+log_level = get_log_level(module_config.log_level)
+
+# 创建输出处理器
+output_handler = get_output_handler(
+    "scanner", 
+    logger, 
+    debug=module_config.debug, 
+    log_level=log_level, 
+    enable_debug=module_config.enable_debug
+)
+
+# 使用输出处理器
+output_handler.info("开始扫描论文")
+output_handler.debug("调试信息")
+output_handler.warning("警告信息")
+output_handler.error("错误信息")
+```
+
+### 3.11 GUI模块 (gui/)
+
+#### 3.11.1 设计原则
 - **轻量化**: 单页应用，无复杂框架
 - **直接调用**: 通过API直接调用现有main.py接口
 - **配置编辑**: 基于现有config.yaml进行编辑
 - **数据显示**: 基于现存brief.json进行论文信息显示
 - **单实例约束**: 同一时间只能运行一个GUI服务器实例
 
-#### 3.10.2 后端设计 (server.py)
+#### 3.11.2 后端设计 (server.py)
 ```python
 class FlaskBackend:
     """Flask后端服务器"""
@@ -1439,16 +1602,23 @@ class FlaskBackend:
     def get_paper(arxiv_id):
         """获取单篇论文详情"""
         pass
+    
+    @app.route('/api/config/output', methods=['GET', 'POST'])
+    def handle_output_config():
+        """输出配置管理"""
+        # 读取和保存输出配置
+        pass
 ```
 
-#### 3.10.3 前端设计 (index.html + app.js)
+#### 3.11.3 前端设计 (index.html + app.js)
 - **配置区域**: 编辑config.yaml的各项配置
 - **执行区域**: 选择执行模式（扫描/总结/发布/完整流程）
 - **论文列表**: 显示已处理的论文列表
 - **日志输出**: 实时显示执行日志
 - **单实例提示**: 检测到多实例时显示警告
+- **输出配置**: 可视化配置各模块的输出参数
 
-#### 3.10.4 API接口列表
+#### 3.11.4 API接口列表
 | 接口 | 方法 | 说明 |
 |------|------|------|
 | / | GET | 返回index.html主页 |
@@ -1456,8 +1626,9 @@ class FlaskBackend:
 | /api/config | GET/POST | 获取/更新配置 |
 | /api/papers | GET | 获取论文列表 |
 | /api/paper/<id> | GET | 获取论文详情 |
+| /api/config/output | GET/POST | 获取/更新输出配置 |
 
-#### 3.10.5 单实例约束实现
+#### 3.11.5 单实例约束实现
 ```python
 def check_single_instance(port=5000):
     """检查是否只有一个实例在运行"""

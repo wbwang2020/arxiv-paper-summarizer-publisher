@@ -12,9 +12,11 @@ from summarizer import PaperSummarizer
 from storage import PaperStorage
 from publisher import ZhihuPlaywrightPublisher
 from scheduler import TaskScheduler
-from utils import get_logger, setup_logging, BatchProgress, PaperProgress, print_header
+from utils import get_logger, setup_logging, BatchProgress, PaperProgress, print_header, get_output_handler, get_log_level
 
 logger = get_logger()
+
+output_handler = None  # 延迟初始化
 
 
 @dataclass
@@ -42,12 +44,34 @@ class ArxivSurveySystem:
         # 加载配置
         if config_path and os.path.exists(config_path):
             self.config = Config.from_yaml(config_path)
-            logger.info(f"从 {config_path} 加载配置")
+            # 初始化输出处理器
+            core_config = self.config.output.get_module_config("core")
+            log_level = get_log_level(core_config.log_level)
+            global output_handler
+            output_handler = get_output_handler(
+                "core", 
+                logger, 
+                debug=core_config.debug, 
+                log_level=log_level, 
+                enable_debug=core_config.enable_debug
+            )
+            output_handler.info(f"从 {config_path} 加载配置")
             # 环境变量覆盖YAML配置
             self._apply_env_overrides()
         else:
             self.config = Config.from_env()
-            logger.info("从环境变量加载配置")
+            # 初始化输出处理器
+            core_config = self.config.output.get_module_config("core")
+            log_level = get_log_level(core_config.log_level)
+            global output_handler
+            output_handler = get_output_handler(
+                "core", 
+                logger, 
+                debug=core_config.debug, 
+                log_level=log_level, 
+                enable_debug=core_config.enable_debug
+            )
+            output_handler.info("从环境变量加载配置")
     
     def _apply_env_overrides(self):
         """应用环境变量覆盖配置"""
@@ -56,16 +80,16 @@ class ArxivSurveySystem:
         # 知乎配置覆盖
         if os.getenv("ZHIHU_ENABLED"):
             self.config.zhihu.enabled = os.getenv("ZHIHU_ENABLED", "true").lower() == "true"
-            logger.info(f"从环境变量覆盖 zhihu.enabled: {self.config.zhihu.enabled}")
+            output_handler.info(f"从环境变量覆盖 zhihu.enabled: {self.config.zhihu.enabled}")
         
         if os.getenv("ZHIHU_COOKIE"):
             self.config.zhihu.cookie = os.getenv("ZHIHU_COOKIE", "")
-            logger.info("从环境变量覆盖 zhihu.cookie")
+            output_handler.info("从环境变量覆盖 zhihu.cookie")
         
         # DeepSeek API密钥覆盖
         if os.getenv("DEEPSEEK_API_KEY"):
             self.config.ai.api_key = os.getenv("DEEPSEEK_API_KEY", "")
-            logger.info("从环境变量覆盖 ai.api_key")
+            output_handler.info("从环境变量覆盖 ai.api_key")
         
         # 初始化组件
         self.scanner = ArxivScanner(self.config.arxiv)
@@ -87,9 +111,9 @@ class ArxivSurveySystem:
         检查知乎登录状态
         """
         if self.publisher.check_login():
-            logger.info("知乎登录成功，可以发布")
+            output_handler.info("知乎登录成功，可以发布")
         else:
-            logger.warning("知乎登录失败，发布功能可能无法使用")
+            output_handler.warning("知乎登录失败，发布功能可能无法使用")
     
     def run_once(self) -> ProcessingResult:
         """
@@ -99,22 +123,19 @@ class ArxivSurveySystem:
             处理结果
         """
         print_header("ArXiv 文献自动总结系统 - 单次运行")
-        logger.info("=" * 60)
-        logger.info("启动ArXiv文献自动总结系统 - 单次运行")
-        logger.info("=" * 60)
+        output_handler.info("=" * 60)
+        output_handler.info("启动ArXiv文献自动总结系统 - 单次运行")
+        output_handler.info("=" * 60)
         
         # 1. 扫描论文
-        print("\n🔍 步骤 1: 扫描 arXiv 论文...")
-        logger.info("步骤 1: 扫描arXiv论文...")
+        output_handler.info("\n步骤 1: 扫描 arXiv 论文...")
         papers = self.scanner.search_recent_papers()
         
         if not papers:
-            print("❌ 没有找到新论文")
-            logger.info("没有找到新论文")
+            output_handler.info("没有找到新论文")
             return ProcessingResult(0, 0, 0, [])
         
-        print(f"✅ 找到 {len(papers)} 篇论文待处理")
-        logger.info(f"找到 {len(papers)} 篇论文待处理")
+        output_handler.info(f"找到 {len(papers)} 篇论文待处理")
         
         # 2. 处理每篇论文
         batch_progress = BatchProgress(len(papers))
@@ -129,16 +150,14 @@ class ArxivSurveySystem:
                 # 获取已存在的信息
                 existing_info = self.storage.get_paper_summary_info(paper.arxiv_id, months=2)
                 folder_info = f" (位于 {existing_info['folder']} 文件夹)" if existing_info else ""
-                print(f"⏭️  跳过已总结的论文: {paper.arxiv_id}{folder_info}")
-                logger.info(f"跳过已总结的论文: {paper.arxiv_id}{folder_info}")
+                output_handler.info(f"跳过已总结的论文: {paper.arxiv_id}{folder_info}")
                 task.update_status(TaskStatus.SKIPPED)
                 batch_progress.mark_skipped()
                 continue
             
             # 检查全局是否已处理（向后兼容）
             if self.storage.exists(paper.arxiv_id):
-                print(f"⏭️  跳过已处理的论文: {paper.arxiv_id}")
-                logger.info(f"跳过已处理的论文: {paper.arxiv_id}")
+                output_handler.info(f"跳过已处理的论文: {paper.arxiv_id}")
                 task.update_status(TaskStatus.SKIPPED)
                 batch_progress.mark_skipped()
                 continue
@@ -149,8 +168,7 @@ class ArxivSurveySystem:
                 self._execute_task_with_progress(task, batch_progress)
                 batch_progress.mark_success()
             except Exception as e:
-                print(f"❌ 处理论文 {paper.arxiv_id} 时出错: {e}")
-                logger.error(f"处理论文 {paper.arxiv_id} 时出错: {e}")
+                output_handler.error(f"处理论文 {paper.arxiv_id} 时出错: {e}")
                 task.update_status(TaskStatus.FAILED, str(e))
                 batch_progress.mark_failed()
         
@@ -161,25 +179,25 @@ class ArxivSurveySystem:
         
         batch_progress.show_summary()
         
-        logger.info("=" * 60)
-        logger.info("处理完成")
-        logger.info(f"  成功: {success}")
-        logger.info(f"  失败: {failed}")
-        logger.info(f"  跳过: {skipped}")
-        logger.info("=" * 60)
+        output_handler.info("=" * 60)
+        output_handler.info("处理完成")
+        output_handler.info(f"  成功: {success}")
+        output_handler.info(f"  失败: {failed}")
+        output_handler.info(f"  跳过: {skipped}")
+        output_handler.info("=" * 60)
         
         return ProcessingResult(success, failed, skipped, tasks)
     
     def run_continuous(self):
         """持续运行，按配置定时执行"""
         if not self.config.scheduler.enabled:
-            logger.warning("配置中禁用了调度器")
+            output_handler.warning("配置中禁用了调度器")
             return
         
-        logger.info("=" * 60)
-        logger.info("启动ArXiv文献自动总结系统 - 持续运行模式")
-        logger.info(f"调度计划: {self.config.scheduler.cron}")
-        logger.info("=" * 60)
+        output_handler.info("=" * 60)
+        output_handler.info("启动ArXiv文献自动总结系统 - 持续运行模式")
+        output_handler.info(f"调度计划: {self.config.scheduler.cron}")
+        output_handler.info("=" * 60)
         
         # 设置定时任务
         self.scheduler.schedule_cron_task(
@@ -191,7 +209,7 @@ class ArxivSurveySystem:
         try:
             self.scheduler.start(block=True)
         except KeyboardInterrupt:
-            logger.info("收到中断信号，正在停止...")
+            output_handler.info("收到中断信号，正在停止...")
             self.scheduler.stop()
     
     def process_single_paper(self, arxiv_id: str) -> PaperTask:
@@ -204,7 +222,7 @@ class ArxivSurveySystem:
         Returns:
             处理任务
         """
-        logger.info(f"处理单篇论文: {arxiv_id}")
+        output_handler.info(f"处理单篇论文: {arxiv_id}")
         
         # 获取论文信息
         paper = self.scanner.get_paper_by_id(arxiv_id)
@@ -248,7 +266,7 @@ class ArxivSurveySystem:
         
         try:
             # 1. 下载PDF
-            logger.info(f"[{paper.arxiv_id}] 步骤 1/5: 下载PDF...")
+            output_handler.info(f"[{paper.arxiv_id}] 步骤 1/5: 下载PDF...")
             task.update_status(TaskStatus.DOWNLOADING)
             
             pdf_path = self.temp_dir / f"{paper.arxiv_id.replace('/', '_')}.pdf"
@@ -257,7 +275,7 @@ class ArxivSurveySystem:
                 raise RuntimeError("Failed to download PDF")
             
             # 2. 提取文本
-            logger.info(f"[{paper.arxiv_id}] 步骤 2/5: 从PDF提取文本...")
+            output_handler.info(f"[{paper.arxiv_id}] 步骤 2/5: 从PDF提取文本...")
             
             extractor = PDFExtractor()
             content = extractor.extract_text(str(pdf_path))
@@ -265,17 +283,17 @@ class ArxivSurveySystem:
             if not content:
                 raise RuntimeError("Failed to extract text from PDF")
             
-            logger.info(f"[{paper.arxiv_id}] 提取了 {len(content)} 个字符")
+            output_handler.info(f"[{paper.arxiv_id}] 提取了 {len(content)} 个字符")
             
             # 3. AI总结
-            logger.info(f"[{paper.arxiv_id}] 步骤 3/5: 使用AI生成总结...")
+            output_handler.info(f"[{paper.arxiv_id}] 步骤 3/5: 使用AI生成总结...")
             task.update_status(TaskStatus.SUMMARIZING)
             
             summary = self.summarizer.summarize(paper, content)
             task.summary = summary
             
             # 4. 保存到本地
-            logger.info(f"[{paper.arxiv_id}] 步骤 4/5: 保存到本地存储...")
+            output_handler.info(f"[{paper.arxiv_id}] 步骤 4/5: 保存到本地存储...")
             task.update_status(TaskStatus.STORING)
             
             file_path = self.storage.save_summary(summary, paper)
@@ -283,28 +301,28 @@ class ArxivSurveySystem:
             
             # 5. 发布到知乎
             if self.config.zhihu.enabled:
-                logger.info(f"[{paper.arxiv_id}] 步骤 5/5: 发布到知乎...")
+                output_handler.info(f"[{paper.arxiv_id}] 步骤 5/5: 发布到知乎...")
                 task.update_status(TaskStatus.PUBLISHING)
                 
                 zhihu_url = self.publisher.publish(summary, paper)
                 if zhihu_url:
                     task.zhihu_url = zhihu_url
-                    logger.info(f"[{paper.arxiv_id}] 已发布到知乎: {zhihu_url}")
+                    output_handler.info(f"[{paper.arxiv_id}] 已发布到知乎: {zhihu_url}")
                 else:
-                    logger.warning(f"[{paper.arxiv_id}] 发布到知乎失败")
+                    output_handler.warning(f"[{paper.arxiv_id}] 发布到知乎失败")
             else:
-                logger.info(f"[{paper.arxiv_id}] 步骤 5/5: 知乎发布已禁用")
+                output_handler.info(f"[{paper.arxiv_id}] 步骤 5/5: 知乎发布已禁用")
             
             # 完成任务
             task.update_status(TaskStatus.COMPLETED)
-            logger.info(f"[{paper.arxiv_id}] 任务完成")
+            output_handler.info(f"[{paper.arxiv_id}] 任务完成")
             
             # 清理临时文件
             if pdf_path.exists():
                 pdf_path.unlink()
             
         except Exception as e:
-            logger.error(f"[{paper.arxiv_id}] 任务失败: {e}")
+            output_handler.error(f"[{paper.arxiv_id}] 任务失败: {e}")
             task.update_status(TaskStatus.FAILED, str(e))
         
         return task
@@ -384,7 +402,7 @@ class ArxivSurveySystem:
             
             # 完成任务
             task.update_status(TaskStatus.COMPLETED)
-            progress.info("✅ 任务完成")
+            progress.info("任务完成")
             
             # 清理临时文件
             if pdf_path.exists():
@@ -392,7 +410,7 @@ class ArxivSurveySystem:
             
         except Exception as e:
             progress.error(f"任务失败: {e}")
-            logger.error(f"[{paper.arxiv_id}] 任务失败: {e}")
+            output_handler.error(f"[{paper.arxiv_id}] 任务失败: {e}")
             task.update_status(TaskStatus.FAILED, str(e))
         
         return task

@@ -17,10 +17,10 @@ from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
 
-from config import ZhihuConfig, StorageConfig
+from config import ZhihuConfig, StorageConfig, Config
 from models import ArxivPaper, PaperSummary
 from storage.storage import PaperStorage
-from utils import get_logger
+from utils import get_logger, get_output_handler, get_log_level
 
 # 导入子模块
 from publisher.zhihu_modules import TitleSettingsHandler, PublishSettingsHandler, ContentFiller
@@ -53,6 +53,22 @@ class ZhihuPlaywrightPublisher:
         storage_config = StorageConfig()
         self.storage = PaperStorage(storage_config)
         
+        # 初始化输出处理器
+        try:
+            full_config = Config.from_yaml("config/config.yaml")
+            publisher_config = full_config.output.get_module_config("publisher")
+            log_level = get_log_level(publisher_config.log_level)
+            self.output_handler = get_output_handler(
+                "publisher", 
+                logger, 
+                debug=publisher_config.debug,
+                log_level=log_level,
+                enable_debug=publisher_config.enable_debug
+            )
+        except Exception as e:
+            # 如果加载失败，使用默认设置
+            self.output_handler = get_output_handler("publisher", logger, debug=self.debug)
+        
         # 初始化子模块（将在浏览器初始化后设置）
         self.title_handler: Optional[TitleSettingsHandler] = None
         self.publish_settings_handler: Optional[PublishSettingsHandler] = None
@@ -60,17 +76,14 @@ class ZhihuPlaywrightPublisher:
     
     def _debug_print(self, message: str):
         """调试模式下输出信息"""
-        if self.debug:
-            print(message)
+        self.output_handler.debug_print(message)
     
     def _debug_screenshot(self, path: str):
         """调试模式下保存截图"""
-        if self.debug and self.page:
-            try:
+        def screenshot_func(path):
+            if self.page:
                 self.page.screenshot(path=path)
-                print(f"[CAMERA] 已保存截图: {path}")
-            except Exception as e:
-                print(f"[!] 截图失败: {e}")
+        self.output_handler.screenshot(path, screenshot_func)
     
     def _init_handlers(self):
         """初始化子模块处理器"""
@@ -142,10 +155,10 @@ class ZhihuPlaywrightPublisher:
                 args=['--disable-blink-features=AutomationControlled']
             )
             logger.info("使用系统Chrome浏览器")
-            self._debug_print("[OK] 成功使用系统Chrome浏览器")
+            self._debug_print("[成功] 成功使用系统Chrome浏览器")
         except Exception as e:
             logger.warning(f"使用系统Chrome失败: {e}，尝试使用chromium")
-            self._debug_print(f"[!] 系统Chrome不可用: {e}")
+            self._debug_print(f"[警告] 系统Chrome不可用: {e}")
             self._debug_print("尝试使用Playwright自带的Chromium...")
             try:
                 self.browser = self.playwright.chromium.launch(
@@ -153,10 +166,10 @@ class ZhihuPlaywrightPublisher:
                     args=['--disable-blink-features=AutomationControlled']
                 )
                 logger.info("使用Playwright Chromium")
-                self._debug_print("[OK] 成功使用Playwright Chromium")
+                self._debug_print("[成功] 成功使用Playwright Chromium")
             except Exception as e2:
                 logger.error(f"启动Chromium失败: {e2}")
-                self._debug_print(f"[X] 无法启动浏览器: {e2}")
+                self._debug_print(f"[错误] 无法启动浏览器: {e2}")
                 raise
         
         # 创建上下文并设置Cookie
@@ -235,11 +248,11 @@ class ZhihuPlaywrightPublisher:
             
             self._debug_print("正在访问知乎首页...")
             self.page.goto(self.BASE_URL, wait_until='domcontentloaded', timeout=60000)
-            self._debug_print(f"[OK] 成功访问知乎首页: {self.page.url}")
+            self._debug_print(f"[成功] 成功访问知乎首页: {self.page.url}")
             
             self._debug_print("等待页面加载完成...")
             self.page.wait_for_load_state('networkidle', timeout=60000)
-            self._debug_print("[OK] 页面加载完成")
+            self._debug_print("[成功] 页面加载完成")
             
             self._debug_screenshot("debug_login_check.png")
             
@@ -249,10 +262,10 @@ class ZhihuPlaywrightPublisher:
             
             if is_logged_in:
                 logger.info("登录检查通过")
-                self._debug_print("[OK] 知乎登录状态正常")
+                self._debug_print("[成功] 知乎登录状态正常")
             else:
                 logger.warning("登录检查失败 - 未找到用户元素")
-                self._debug_print("[X] 知乎登录状态异常")
+                self._debug_print("[错误] 知乎登录状态异常")
             
             self._debug_print(f"页面标题: {self.page.title()}")
             
@@ -260,7 +273,7 @@ class ZhihuPlaywrightPublisher:
             
         except Exception as e:
             logger.error(f"检查登录状态时出错: {e}")
-            self._debug_print(f"[X] 测试登录状态失败: {e}")
+            self._debug_print(f"[错误] 测试登录状态失败: {e}")
             self._debug_screenshot("debug_login_error.png")
             import traceback
             traceback.print_exc()
@@ -291,7 +304,7 @@ class ZhihuPlaywrightPublisher:
         self._debug_print("等待编辑器加载...")
         self.page.wait_for_selector('textarea[placeholder*="标题"], .WriteIndex-titleInput textarea', timeout=30000)
         time.sleep(2)
-        self._debug_print("[OK] 编辑器已加载")
+        self._debug_print("[成功] 编辑器已加载")
         
         self._debug_screenshot("debug_editor_initial.png")
         
@@ -321,7 +334,7 @@ class ZhihuPlaywrightPublisher:
             self.content_filler.fill_content(content, file_path, content_fill_mode)
         
         logger.info("内容填充成功")
-        self._debug_print("[OK] 文章内容填充完成")
+        self._debug_print("[成功] 文章内容填充完成")
     
     def _select_column(self, column_name: str) -> bool:
         """
@@ -357,18 +370,18 @@ class ZhihuPlaywrightPublisher:
                 return self._publish_directly()
         except Exception as e:
             logger.error(f"发布文章时出错: {e}")
-            self._debug_print(f"[X] 发布文章时出错: {e}")
+            self._debug_print(f"[错误] 发布文章时出错: {e}")
             return None
     
     def _publish_as_draft(self) -> Optional[str]:
         """发布为草稿"""
-        self._debug_print("[!] 知乎草稿会自动保存，正在等待自动保存完成...")
+        self._debug_print("[警告] 知乎草稿会自动保存，正在等待自动保存完成...")
         
         initial_url = self.page.url
         self._debug_print(f"初始URL: {initial_url}")
         
         if '/draft/' in initial_url or '/p/' in initial_url:
-            self._debug_print(f"[OK] 草稿自动保存成功! 文章URL: {initial_url}")
+            self._debug_print(f"[成功] 草稿自动保存成功! 文章URL: {initial_url}")
             return initial_url
         
         for i in range(6):
@@ -377,14 +390,14 @@ class ZhihuPlaywrightPublisher:
             self._debug_print(f"当前URL: {current_url}")
             
             if '/draft/' in current_url or '/p/' in current_url:
-                self._debug_print(f"[OK] 草稿自动保存成功! 文章URL: {current_url}")
+                self._debug_print(f"[成功] 草稿自动保存成功! 文章URL: {current_url}")
                 return current_url
             elif current_url != initial_url:
-                self._debug_print(f"[OK] 草稿自动保存成功! 文章URL: {current_url}")
+                self._debug_print(f"[成功] 草稿自动保存成功! 文章URL: {current_url}")
                 return current_url
         
         article_url = self.page.url
-        self._debug_print(f"[!] 自动保存超时，但返回当前URL: {article_url}")
+        self._debug_print(f"[警告] 自动保存超时，但返回当前URL: {article_url}")
         return article_url
     
     def _publish_directly(self) -> Optional[str]:
@@ -402,7 +415,7 @@ class ZhihuPlaywrightPublisher:
         publish_button = self._find_publish_button()
         
         if not publish_button:
-            self._debug_print("[X] 未找到发布按钮")
+            self._debug_print("[错误] 未找到发布按钮")
             return None
         
         # 检查内容长度
@@ -410,7 +423,7 @@ class ZhihuPlaywrightPublisher:
         
         # 等待按钮激活
         if not self._wait_for_button_active(publish_button):
-            self._debug_print("[!] 发布按钮未激活，尝试强制点击")
+            self._debug_print("[警告] 发布按钮未激活，尝试强制点击")
         
         # 多次尝试点击发布按钮
         max_click_attempts = 3
@@ -427,32 +440,32 @@ class ZhihuPlaywrightPublisher:
             # 检查是否有弹窗出现
             modal_handled = self._handle_publish_modal()
             if modal_handled:
-                self._debug_print("[OK] 处理了发布弹窗")
+                self._debug_print("[成功] 处理了发布弹窗")
                 time.sleep(3)
             
             # 检查URL是否变化
             current_url = self.page.url
             if '/p/' in current_url and '/edit' not in current_url:
                 logger.info(f"文章已发布: {current_url}")
-                self._debug_print(f"[OK] 发布成功! 文章URL: {current_url}")
+                self._debug_print(f"[成功] 发布成功! 文章URL: {current_url}")
                 return current_url
             
             # 检查是否有新窗口/标签页打开
             pages = self.page.context.pages
             if len(pages) > 1:
-                self._debug_print("[OK] 检测到新页面打开")
+                self._debug_print("[成功] 检测到新页面打开")
                 # 切换到新页面
                 new_page = pages[-1]
                 new_url = new_page.url
                 if '/p/' in new_url:
                     logger.info(f"文章已在新标签页发布: {new_url}")
-                    self._debug_print(f"[OK] 发布成功! 新页面URL: {new_url}")
+                    self._debug_print(f"[成功] 发布成功! 新页面URL: {new_url}")
                     return new_url
             
             # 如果仍在编辑页面，重新查找发布按钮
             publish_button = self._find_publish_button()
             if not publish_button:
-                self._debug_print("[OK] 发布按钮消失，可能已发布成功")
+                self._debug_print("[成功] 发布按钮消失，可能已发布成功")
                 return self.page.url
         
         # 等待页面跳转
@@ -474,7 +487,7 @@ class ZhihuPlaywrightPublisher:
                 self._debug_print(f"尝试选择器: {selector}")
                 elem = self.page.query_selector(selector)
                 if elem and elem.is_visible():
-                    self._debug_print(f"[OK] 找到发布按钮: {selector}")
+                    self._debug_print(f"[成功] 找到发布按钮: {selector}")
                     return elem
             except Exception as e:
                 self._debug_print(f"选择器 {selector} 失败: {e}")
@@ -517,7 +530,7 @@ class ZhihuPlaywrightPublisher:
             
             if word_count == 0:
                 # 如果无法从状态栏读取，尝试从编辑器内容计算
-                self._debug_print("[!] 无法从状态栏读取字数，尝试从编辑器内容计算...")
+                self._debug_print("[警告] 无法从状态栏读取字数，尝试从编辑器内容计算...")
                 content_editor = self.page.query_selector('.DraftEditor-root .public-DraftEditor-content')
                 if content_editor:
                     content_text = content_editor.text_content()
@@ -527,11 +540,11 @@ class ZhihuPlaywrightPublisher:
             self._debug_print(f"当前正文内容长度: {word_count} 字符")
             
             if word_count < 8:
-                self._debug_print("[!] 正文内容长度不足8个字符，尝试添加额外内容")
+                self._debug_print("[警告] 正文内容长度不足8个字符，尝试添加额外内容")
                 self.page.keyboard.press('End')
                 time.sleep(0.5)
                 self.page.keyboard.type("\n\n*注：本文由自动生成工具发布*")
-                self._debug_print("[OK] 已添加额外内容")
+                self._debug_print("[成功] 已添加额外内容")
                 time.sleep(1)
         except Exception as e:
             self._debug_print(f"检查内容长度时出错: {e}")
@@ -575,7 +588,7 @@ class ZhihuPlaywrightPublisher:
             self._debug_print(f"  按钮激活状态: {is_active}")
             
             if is_active:
-                self._debug_print("[OK] 发布按钮已激活")
+                self._debug_print("[成功] 发布按钮已激活")
                 return True
             
             try:
@@ -599,9 +612,9 @@ class ZhihuPlaywrightPublisher:
         try:
             publish_button.click()
             click_success = True
-            self._debug_print("[OK] 普通点击成功")
+            self._debug_print("[成功] 普通点击成功")
         except Exception as e:
-            self._debug_print(f"[!] 普通点击失败: {e}")
+            self._debug_print(f"[警告] 普通点击失败: {e}")
         
         # 方式2: force_click
         if not click_success:
@@ -609,9 +622,9 @@ class ZhihuPlaywrightPublisher:
             try:
                 publish_button.click(force=True)
                 click_success = True
-                self._debug_print("[OK] force_click成功")
+                self._debug_print("[成功] force_click成功")
             except Exception as e:
-                self._debug_print(f"[!] force_click失败: {e}")
+                self._debug_print(f"[警告] force_click失败: {e}")
         
         # 方式3: JavaScript点击
         if not click_success:
@@ -619,13 +632,13 @@ class ZhihuPlaywrightPublisher:
             try:
                 self.page.evaluate('(elem) => elem.click()', publish_button)
                 click_success = True
-                self._debug_print("[OK] JavaScript点击成功")
+                self._debug_print("[成功] JavaScript点击成功")
             except Exception as e:
-                self._debug_print(f"[!] JavaScript点击失败: {e}")
+                self._debug_print(f"[警告] JavaScript点击失败: {e}")
         
         if click_success:
             logger.info("已点击发布按钮")
-            self._debug_print("[OK] 正在发布文章...")
+            self._debug_print("[成功] 正在发布文章...")
             time.sleep(1)
             self._debug_screenshot("debug_after_click.png")
             time.sleep(2)
@@ -654,7 +667,7 @@ class ZhihuPlaywrightPublisher:
             try:
                 modal = self.page.query_selector(selector)
                 if modal and modal.is_visible():
-                    self._debug_print(f"[OK] 发现弹窗: {selector}")
+                    self._debug_print(f"[成功] 发现弹窗: {selector}")
                     
                     confirm_selectors = [
                         'button:has-text("确认")',
@@ -666,9 +679,9 @@ class ZhihuPlaywrightPublisher:
                         try:
                             confirm_btn = modal.query_selector(conf_selector)
                             if confirm_btn and confirm_btn.is_visible():
-                                self._debug_print(f"[OK] 找到确认按钮: {conf_selector}")
+                                self._debug_print(f"[成功] 找到确认按钮: {conf_selector}")
                                 confirm_btn.click()
-                                self._debug_print("[OK] 已点击确认按钮")
+                                self._debug_print("[成功] 已点击确认按钮")
                                 time.sleep(3)
                                 return True
                         except:
@@ -677,7 +690,7 @@ class ZhihuPlaywrightPublisher:
             except:
                 continue
         
-        self._debug_print("[!] 未发现弹窗，可能直接发布了")
+        self._debug_print("[警告] 未发现弹窗，可能直接发布了")
         return False
     
     def _wait_for_publish_completion(self, max_attempts: int = 3) -> Optional[str]:
@@ -690,24 +703,24 @@ class ZhihuPlaywrightPublisher:
             
             if '/p/' in current_url and '/edit' not in current_url:
                 logger.info(f"文章已发布: {current_url}")
-                self._debug_print(f"[OK] 发布成功! 文章URL: {current_url}")
+                self._debug_print(f"[成功] 发布成功! 文章URL: {current_url}")
                 return current_url
             
             # 如果仍在编辑页面，可能发布按钮没有反应，尝试再次点击
             if '/edit' in current_url:
-                self._debug_print("[!] 仍在编辑页面，尝试再次点击发布按钮...")
+                self._debug_print("[警告] 仍在编辑页面，尝试再次点击发布按钮...")
                 publish_button = self._find_publish_button()
                 if publish_button:
                     try:
                         publish_button.click()
-                        self._debug_print("[OK] 再次点击发布按钮")
+                        self._debug_print("[成功] 再次点击发布按钮")
                         time.sleep(3)
                     except Exception as e:
-                        self._debug_print(f"[!] 再次点击失败: {e}")
+                        self._debug_print(f"[警告] 再次点击失败: {e}")
             
             time.sleep(5)
         
-        self._debug_print(f"[X] 发布超时：{max_attempts}次尝试后仍未获取到发布后的URL")
+        self._debug_print(f"[错误] 发布超时：{max_attempts}次尝试后仍未获取到发布后的URL")
         return None
     
     def publish(
@@ -755,7 +768,7 @@ class ZhihuPlaywrightPublisher:
             
             if article_url:
                 logger.info(f"文章发布成功: {article_url}")
-                self._debug_print(f"[OK] 文章发布成功! 链接: {article_url}")
+                self._debug_print(f"[成功] 文章发布成功! 链接: {article_url}")
                 
                 # 更新brief.json中的发布状态
                 self._debug_print("更新brief.json中的发布状态...")
@@ -765,12 +778,12 @@ class ZhihuPlaywrightPublisher:
                     article_url
                 )
                 if success:
-                    self._debug_print("[OK] 发布状态更新成功")
+                    self._debug_print("[成功] 发布状态更新成功")
                 else:
-                    self._debug_print("[!] 发布状态更新失败")
+                    self._debug_print("[警告] 发布状态更新失败")
             else:
                 logger.warning("文章发布失败 - 未返回URL")
-                self._debug_print("[X] 文章发布失败")
+                self._debug_print("[错误] 文章发布失败")
             
             return article_url
             
@@ -815,26 +828,26 @@ class ZhihuPlaywrightPublisher:
             self._debug_print(f"正在读取Markdown文件: {file_path}")
             with open(file_path, 'r', encoding='utf-8') as f:
                 markdown_content = f.read()
-            self._debug_print(f"[OK] 成功读取Markdown文件，内容长度: {len(markdown_content)} 字符")
+            self._debug_print(f"[成功] 成功读取Markdown文件，内容长度: {len(markdown_content)} 字符")
             
             self._debug_print("正在初始化浏览器...")
             self._init_browser(headless=headless)
-            self._debug_print("[OK] 浏览器初始化完成")
+            self._debug_print("[成功] 浏览器初始化完成")
             
             logger.info("Opening Zhihu editor...")
             self._debug_print("正在打开知乎编辑器...")
             try:
                 self.page.goto(self.EDITOR_URL, wait_until='domcontentloaded', timeout=60000)
-                self._debug_print(f"[OK] 成功打开知乎编辑器: {self.EDITOR_URL}")
+                self._debug_print(f"[成功] 成功打开知乎编辑器: {self.EDITOR_URL}")
                 
                 self._debug_screenshot("debug_initial_page.png")
                 
                 self._debug_print("等待页面元素加载...")
                 self.page.wait_for_load_state('networkidle', timeout=60000)
-                self._debug_print("[OK] 页面元素加载完成")
+                self._debug_print("[成功] 页面元素加载完成")
             except Exception as e:
                 logger.error(f"Failed to open editor: {e}")
-                self._debug_print(f"[X] 打开知乎编辑器失败: {e}")
+                self._debug_print(f"[错误] 打开知乎编辑器失败: {e}")
                 self._debug_screenshot("debug_open_error.png")
                 raise
             
@@ -845,10 +858,10 @@ class ZhihuPlaywrightPublisher:
             
             try:
                 self._fill_editor(title, markdown_content, file_path)
-                self._debug_print("[OK] 编辑器填充完成")
+                self._debug_print("[成功] 编辑器填充完成")
             except Exception as e:
                 logger.error(f"Failed to fill editor: {e}")
-                self._debug_print(f"[X] 填充编辑器失败: {e}")
+                self._debug_print(f"[错误] 填充编辑器失败: {e}")
                 self._debug_screenshot("debug_fill_error.png")
                 raise
             
@@ -858,7 +871,7 @@ class ZhihuPlaywrightPublisher:
                 
                 if article_url:
                     logger.info(f"Article published successfully: {article_url}")
-                    self._debug_print(f"[OK] 文章发布成功! 链接: {article_url}")
+                    self._debug_print(f"[成功] 文章发布成功! 链接: {article_url}")
                     
                     # 更新brief.json中的发布状态
                     self._debug_print("更新brief.json中的发布状态...")
@@ -868,15 +881,15 @@ class ZhihuPlaywrightPublisher:
                         article_url
                     )
                     if success:
-                        self._debug_print("[OK] 发布状态更新成功")
+                        self._debug_print("[成功] 发布状态更新成功")
                     else:
-                        self._debug_print("[!] 发布状态更新失败")
+                        self._debug_print("[警告] 发布状态更新失败")
                 else:
                     logger.warning("Article publish failed - no URL returned")
-                    self._debug_print("[X] 文章发布失败")
+                    self._debug_print("[错误] 文章发布失败")
             except Exception as e:
                 logger.error(f"Failed to publish article: {e}")
-                self._debug_print(f"[X] 发布文章失败: {e}")
+                self._debug_print(f"[错误] 发布文章失败: {e}")
                 self._debug_screenshot("debug_publish_error.png")
                 raise
             
@@ -884,7 +897,7 @@ class ZhihuPlaywrightPublisher:
             
         except Exception as e:
             logger.error(f"Error publishing to Zhihu: {e}")
-            self._debug_print(f"[X] 发布失败: {e}")
+            self._debug_print(f"[错误] 发布失败: {e}")
             import traceback
             traceback.print_exc()
             return None

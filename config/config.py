@@ -1,7 +1,23 @@
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 import yaml
+
+
+class ModuleOutputConfig(BaseModel):
+    """模块输出配置"""
+    debug: bool = Field(default=False, description="是否开启调试模式")
+    log_level: str = Field(default="INFO", description="日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL")
+    enable_debug: bool = Field(default=False, description="是否启用调试输出")
+
+
+class OutputConfig(BaseModel):
+    """输出配置"""
+    modules: Dict[str, ModuleOutputConfig] = Field(default_factory=dict, description="各模块的输出配置")
+    
+    def get_module_config(self, module_id: str) -> ModuleOutputConfig:
+        """获取模块的输出配置"""
+        return self.modules.get(module_id, ModuleOutputConfig())
 
 
 class ArxivConfig(BaseModel):
@@ -89,6 +105,7 @@ class Config(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     zhihu: ZhihuConfig = Field(default_factory=ZhihuConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    output: OutputConfig = Field(default_factory=OutputConfig)
     
     @classmethod
     def from_yaml(cls, path: str) -> "Config":

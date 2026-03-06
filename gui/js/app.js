@@ -3,7 +3,7 @@
  */
 
 // API基础URL
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = 'http://127.0.0.1:5000/api';
 
 // 全局变量
 let currentProcess = null;
@@ -12,6 +12,7 @@ let currentPapers = [];
 let selectedPaper = null;
 let currentSections = [];
 let editingSectionIndex = -1;
+let isProcessing = false;
 
 // 初始化
 document.addEventListener('DOMContentLoaded', function() {
@@ -22,6 +23,8 @@ document.addEventListener('DOMContentLoaded', function() {
     loadPapers();
     loadStats();
     loadOperations();
+    loadOutputCache(); // 加载缓存的输出内容
+    loadOutputConfig(); // 加载输出配置
     
     // 温度滑块事件
     const temperatureSlider = document.getElementById('temperature');
@@ -30,6 +33,9 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('temperatureValue').textContent = this.value;
         });
     }
+    
+    // 定期检查处理状态
+    setInterval(checkProcessingStatus, 2000);
 });
 
 // ==================== 标签切换 ====================
@@ -105,6 +111,24 @@ function initAIConfigTabs() {
 
 // ==================== 运行控制 ====================
 
+function loadOutputCache() {
+    const outputArea = document.getElementById('outputArea');
+    const cachedOutput = localStorage.getItem('outputCache');
+    
+    if (cachedOutput) {
+        outputArea.innerHTML = '';
+        const lines = cachedOutput.split('\n');
+        lines.forEach(lineText => {
+            if (lineText.trim() !== '') {
+                const line = document.createElement('div');
+                line.textContent = lineText;
+                outputArea.appendChild(line);
+            }
+        });
+        outputArea.scrollTop = outputArea.scrollHeight;
+    }
+}
+
 async function startExecution() {
     const outputArea = document.getElementById('outputArea');
     const runMode = document.querySelector('input[name="runMode"]:checked').value;
@@ -126,8 +150,9 @@ async function startExecution() {
         args.push('-v');
     }
     
-    // 清空输出区域
+    // 清空输出区域和缓存
     outputArea.innerHTML = '';
+    localStorage.removeItem('outputCache');
     
     try {
         const response = await fetch(`${API_BASE}/run`, {
@@ -138,14 +163,20 @@ async function startExecution() {
             body: JSON.stringify({ args: args })
         });
         
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '请求失败');
+        }
+        
         const reader = response.body.getReader();
-        const decoder = new TextDecoder();
+        const decoder = new TextDecoder('utf-8');
+        let outputContent = '';
         
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             
-            const text = decoder.decode(value);
+            const text = decoder.decode(value, { stream: true });
             // 按行分割文本
             const lines = text.split('\n');
             
@@ -154,8 +185,12 @@ async function startExecution() {
                     const line = document.createElement('div');
                     line.textContent = lineText;
                     outputArea.appendChild(line);
+                    outputContent += lineText + '\n';
                 }
             });
+            
+            // 保存到缓存
+            localStorage.setItem('outputCache', outputContent);
             
             outputArea.scrollTop = outputArea.scrollHeight;
         }
@@ -175,8 +210,24 @@ async function startExecution() {
     }
 }
 
-function stopExecution() {
-    showAlert('停止功能需要在后端实现进程管理', 'warning');
+async function stopExecution() {
+    try {
+        const response = await fetch(`${API_BASE}/stop`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            showAlert('处理已停止', 'success');
+        } else {
+            const error = await response.json();
+            showAlert('停止失败：' + error.error, 'error');
+        }
+    } catch (error) {
+        showAlert('停止处理失败：' + error.message, 'error');
+    }
 }
 
 function getModeName(mode) {
@@ -193,15 +244,21 @@ function getModeName(mode) {
 
 async function loadConfig() {
     try {
+        console.log('开始加载配置...');
         const response = await fetch(`${API_BASE}/config`);
+        console.log('配置请求状态:', response.status);
+        if (!response.ok) {
+            throw new Error(`HTTP错误! 状态: ${response.status}`);
+        }
         currentConfig = await response.json();
+        console.log('配置加载成功:', currentConfig);
         
         // 填充表单
         fillConfigForm(currentConfig);
         
     } catch (error) {
         console.error('加载配置失败：', error);
-        showAlert('加载配置失败', 'error');
+        showAlert('加载配置失败: ' + error.message, 'error');
     }
 }
 
@@ -426,15 +483,21 @@ function objectToYaml(obj, indent = 0) {
 
 async function loadPapers() {
     try {
+        console.log('开始加载论文列表...');
         const response = await fetch(`${API_BASE}/papers`);
+        console.log('论文列表请求状态:', response.status);
+        if (!response.ok) {
+            throw new Error(`HTTP错误! 状态: ${response.status}`);
+        }
         currentPapers = await response.json();
+        console.log('论文列表加载成功:', currentPapers.length, '篇论文');
         
         renderPapersTable(currentPapers);
         updatePaperStats(currentPapers);
         
     } catch (error) {
         console.error('加载论文列表失败：', error);
-        showAlert('加载论文列表失败', 'error');
+        showAlert('加载论文列表失败: ' + error.message, 'error');
     }
 }
 
@@ -827,3 +890,182 @@ window.onclick = function(event) {
         closeModal();
     }
 }
+
+// ==================== 处理状态管理 ====================
+
+async function checkProcessingStatus() {
+    try {
+        const response = await fetch(`${API_BASE}/status`);
+        const data = await response.json();
+        
+        if (data.is_processing !== isProcessing) {
+            isProcessing = data.is_processing;
+            updateProcessingUI();
+        }
+    } catch (error) {
+        console.error('检查处理状态失败：', error);
+    }
+}
+
+function updateProcessingUI() {
+    const startButton = document.querySelector('button[onclick="startExecution()"]');
+    const stopButton = document.createElement('button');
+    stopButton.textContent = '停止处理';
+    stopButton.className = 'btn-secondary';
+    stopButton.onclick = stopExecution;
+    
+    const buttonContainer = startButton.parentElement;
+    
+    if (isProcessing) {
+        startButton.disabled = true;
+        startButton.textContent = '处理中...';
+        
+        // 检查是否已存在停止按钮
+        if (!document.querySelector('button[onclick="stopExecution()"]')) {
+            buttonContainer.appendChild(stopButton);
+        }
+    } else {
+        startButton.disabled = false;
+        startButton.textContent = '开始执行';
+        
+        // 移除停止按钮
+        const existingStopButton = document.querySelector('button[onclick="stopExecution()"]');
+        if (existingStopButton) {
+            existingStopButton.remove();
+        }
+    }
+}
+
+async function stopExecution() {
+    try {
+        const response = await fetch(`${API_BASE}/stop`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            showAlert('处理已停止', 'success');
+        } else {
+            const error = await response.json();
+            showAlert('停止失败：' + error.error, 'error');
+        }
+    } catch (error) {
+        showAlert('停止处理失败：' + error.message, 'error');
+    }
+}
+
+// ==================== 输出配置管理 ====================
+
+async function loadOutputConfig() {
+    try {
+        const response = await fetch(`${API_BASE}/config/output`);
+        const outputConfig = await response.json();
+        renderOutputConfig(outputConfig);
+    } catch (error) {
+        console.error('加载输出配置失败：', error);
+        showAlert('加载输出配置失败', 'error');
+    }
+}
+
+function renderOutputConfig(config) {
+    const modulesContainer = document.getElementById('outputModules');
+    modulesContainer.innerHTML = '';
+    
+    const modules = {
+        'main': '主模块',
+        'core': '核心系统',
+        'scanner': '论文扫描器',
+        'summarizer': 'AI总结器',
+        'storage': '存储管理',
+        'publisher': '知乎发布器',
+        'scheduler': '任务调度器'
+    };
+    
+    for (const [moduleId, moduleName] of Object.entries(modules)) {
+        const moduleConfig = config.modules?.[moduleId] || {
+            debug: false,
+            log_level: 'INFO',
+            enable_debug: false
+        };
+        
+        const moduleDiv = document.createElement('div');
+        moduleDiv.className = 'output-module';
+        moduleDiv.innerHTML = `
+            <h3>${moduleName}</h3>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="${moduleId}-debug" ${moduleConfig.debug ? 'checked' : ''}>
+                    <span>调试模式</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label for="${moduleId}-log-level">日志级别：</label>
+                <select id="${moduleId}-log-level">
+                    <option value="DEBUG" ${moduleConfig.log_level === 'DEBUG' ? 'selected' : ''}>DEBUG</option>
+                    <option value="INFO" ${moduleConfig.log_level === 'INFO' ? 'selected' : ''}>INFO</option>
+                    <option value="WARNING" ${moduleConfig.log_level === 'WARNING' ? 'selected' : ''}>WARNING</option>
+                    <option value="ERROR" ${moduleConfig.log_level === 'ERROR' ? 'selected' : ''}>ERROR</option>
+                    <option value="CRITICAL" ${moduleConfig.log_level === 'CRITICAL' ? 'selected' : ''}>CRITICAL</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="${moduleId}-enable-debug" ${moduleConfig.enable_debug ? 'checked' : ''}>
+                    <span>启用调试输出</span>
+                </label>
+            </div>
+        `;
+        
+        modulesContainer.appendChild(moduleDiv);
+    }
+}
+
+async function saveOutputConfig() {
+    try {
+        const modules = {
+            'main': '主模块',
+            'core': '核心系统',
+            'scanner': '论文扫描器',
+            'summarizer': 'AI总结器',
+            'storage': '存储管理',
+            'publisher': '知乎发布器',
+            'scheduler': '任务调度器'
+        };
+        
+        const modulesConfig = {};
+        for (const moduleId of Object.keys(modules)) {
+            modulesConfig[moduleId] = {
+                debug: document.getElementById(`${moduleId}-debug`).checked,
+                log_level: document.getElementById(`${moduleId}-log-level`).value,
+                enable_debug: document.getElementById(`${moduleId}-enable-debug`).checked
+            };
+        }
+        
+        const outputConfig = {
+            modules: modulesConfig
+        };
+        
+        const response = await fetch(`${API_BASE}/config/output`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(outputConfig)
+        });
+        
+        if (response.ok) {
+            showAlert('输出配置保存成功', 'success');
+        } else {
+            throw new Error('保存失败');
+        }
+        
+    } catch (error) {
+        showAlert('保存输出配置失败：' + error.message, 'error');
+    }
+}
+
+// 在初始化时加载输出配置
+// 注意：避免重复的DOMContentLoaded事件监听器
+// 输出配置加载已在主初始化函数中调用

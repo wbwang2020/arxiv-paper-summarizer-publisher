@@ -16,6 +16,8 @@
 - **长上下文**: 支持128k上下文长度处理长论文
 - **Web GUI**: 轻量级Web界面，支持配置编辑、论文列表查看和实时日志输出
 - **单实例约束**: GUI服务器同一时间只能运行一个实例
+- **统一输出处理**: 集中管理各模块的输出，支持不同级别日志输出控制
+- **模块化输出配置**: 为每个模块提供独立的输出配置，支持从配置文件和GUI界面进行管理
 
 ## 快速开始
 
@@ -317,6 +319,63 @@ zhihu:
    - `d_c0`
    - `SESSIONID`
 6. 格式：`key1=value1; key2=value2; ...`
+
+### 输出配置
+
+系统采用统一的输出处理机制，为每个模块提供独立的输出配置，支持不同级别日志输出控制。
+
+#### 配置示例
+
+```yaml
+output:
+  modules:
+    main: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    core: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    scanner: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    summarizer: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    storage: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    publisher: 
+      debug: true
+      log_level: INFO
+      enable_debug: true
+    scheduler: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+```
+
+#### 模块输出配置参数
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| debug | bool | false | 是否开启调试模式 |
+| log_level | string | "INFO" | 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL |
+| enable_debug | bool | false | 是否启用调试输出 |
+
+#### 支持的模块
+
+- **main**: 主模块
+- **core**: 核心系统模块
+- **scanner**: 论文扫描器
+- **summarizer**: AI总结器
+- **storage**: 存储管理
+- **publisher**: 知乎发布器
+- **scheduler**: 任务调度器
 
 ## AI总结维度
 
@@ -687,6 +746,7 @@ python gui/server.py
      - **章节定义**：可视化编辑章节定义（增删改查、排序）
    - 存储配置：目录、格式、文件名模板等
    - 知乎配置：Cookie、专栏、发布模式等
+   - 输出配置：可视化配置各模块的输出参数（调试模式、日志级别、调试输出）
 2. **执行控制**: 选择执行模式（仅扫描/仅总结/仅发布/完整流程）
 3. **论文列表**: 查看已处理的论文列表和状态
 4. **实时日志**: 显示执行过程中的实时日志输出
@@ -696,7 +756,11 @@ python gui/server.py
    - 删除选中章节
    - 上移/下移调整顺序
    - 支持文本和列表两种字段类型
-6. **单实例约束**: 同一时间只能运行一个GUI实例
+6. **输出配置管理**: 可视化配置各模块的输出参数
+   - 为每个模块单独设置调试模式
+   - 为每个模块单独设置日志级别
+   - 为每个模块单独设置是否启用调试输出
+7. **单实例约束**: 同一时间只能运行一个GUI实例
 
 ### 单实例约束
 
@@ -740,6 +804,16 @@ MIT License
 本项目不保证响应Issue和Pull Request。
 
 ## 更新日志
+
+### v1.6.0 (2026-03-06)
+- ✅ 实现统一输出处理模块（OutputHandler）
+- ✅ 支持模块化输出配置，为每个模块提供独立的输出控制
+- ✅ 新增 `ModuleOutputConfig` 和 `OutputConfig` 配置类
+- ✅ 新增 `output` 配置字段，支持各模块独立输出设置
+- ✅ 实现 `get_log_level` 工具函数，集中管理日志级别转换
+- ✅ GUI更新：添加输出配置标签页，支持可视化配置各模块输出参数
+- ✅ 支持从配置文件和GUI界面管理输出配置
+- ✅ 优化代码结构，移除重复的日志级别映射定义
 
 ### v1.5.0 (2026-03-04)
 - ✅ 实现轻量级Web GUI界面

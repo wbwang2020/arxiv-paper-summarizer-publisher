@@ -27,9 +27,24 @@ from core import ArxivSurveySystem
 from config import Config
 from publisher import ZhihuPlaywrightPublisher
 from models import ArxivPaper
-from utils import get_logger, setup_logging
+from utils import get_logger, setup_logging, get_output_handler, get_log_level
 
 logger = get_logger()
+
+# 加载配置以获取输出设置
+config = Config.from_yaml("config/config.yaml")
+main_config = config.output.get_module_config("main")
+
+# 转换日志级别
+log_level = get_log_level(main_config.log_level)
+
+output_handler = get_output_handler(
+    "main", 
+    logger, 
+    debug=main_config.debug, 
+    log_level=log_level, 
+    enable_debug=main_config.enable_debug
+)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -330,22 +345,22 @@ def publish_papers_to_zhihu(config: Config, papers: List[Dict]) -> Dict:
         发布结果统计
     """
     if not papers:
-        print("[OK] 没有需要发布的论文")
+        output_handler.info("[成功] 没有需要发布的论文")
         return {"success": 0, "failed": 0, "total": 0}
     
-    print(f"\n[!] 找到 {len(papers)} 篇未发布的论文")
-    print(f"   目标专栏: {config.zhihu.column_name}")
+    output_handler.info(f"\n[警告] 找到 {len(papers)} 篇未发布的论文")
+    output_handler.info(f"   目标专栏: {config.zhihu.column_name}")
     
     # 创建发布器
-    print("\n初始化知乎发布器...")
+    output_handler.info("\n初始化知乎发布器...")
     publisher = ZhihuPlaywrightPublisher(config.zhihu)
     
     # 检查知乎登录
-    print("检查知乎登录状态...")
+    output_handler.info("检查知乎登录状态...")
     if not publisher.check_login():
-        print("[X] 知乎登录失败，请检查cookie")
+        output_handler.error("[错误] 知乎登录失败，请检查cookie")
         return {"success": 0, "failed": len(papers), "total": len(papers)}
-    print("[OK] 知乎登录成功")
+    output_handler.info("[成功] 知乎登录成功")
     
     success_count = 0
     failed_count = 0
@@ -357,13 +372,13 @@ def publish_papers_to_zhihu(config: Config, papers: List[Dict]) -> Dict:
         title = paper_info["title"]
         file_path = paper_info["file_path"]
         
-        print(f"\n[{i}/{len(papers)}] 发布论文: {title[:50]}...")
-        print(f"   arXiv ID: {arxiv_id}")
+        output_handler.info(f"\n[{i}/{len(papers)}] 发布论文: {title[:50]}...")
+        output_handler.info(f"   arXiv ID: {arxiv_id}")
         
         try:
             # 检查文件路径
             if not file_path:
-                print(f"[X] 论文文件路径不存在: {arxiv_id}")
+                output_handler.error(f"[错误] 论文文件路径不存在: {arxiv_id}")
                 failed_count += 1
                 continue
             
@@ -373,7 +388,7 @@ def publish_papers_to_zhihu(config: Config, papers: List[Dict]) -> Dict:
                 # 尝试添加 base_dir 前缀
                 full_path = base_dir / file_path
             if not full_path.exists():
-                print(f"[X] 论文文件不存在: {full_path}")
+                output_handler.error(f"[错误] 论文文件不存在: {full_path}")
                 failed_count += 1
                 continue
             
@@ -403,14 +418,14 @@ def publish_papers_to_zhihu(config: Config, papers: List[Dict]) -> Dict:
             )
             
             if article_url:
-                print(f"[OK] 发布成功: {article_url}")
+                output_handler.info(f"[成功] 发布成功: {article_url}")
                 success_count += 1
             else:
-                print(f"[X] 发布失败")
+                output_handler.error(f"[错误] 发布失败")
                 failed_count += 1
                 
         except Exception as e:
-            print(f"[X] 发布时出错: {e}")
+            output_handler.error(f"[错误] 发布时出错: {e}")
             logger.error(f"发布论文 {arxiv_id} 时出错: {e}", exc_info=True)
             failed_count += 1
     
@@ -427,16 +442,16 @@ def scan_and_summarize(system: ArxivSurveySystem) -> Dict:
     Returns:
         扫描结果统计
     """
-    print("=" * 70)
-    print("🔍 步骤1: 扫描arXiv论文")
-    print("=" * 70)
+    output_handler.info("=" * 70)
+    output_handler.info("步骤1: 扫描arXiv论文")
+    output_handler.info("=" * 70)
     
     result = system.run_once()
     
-    print(f"\n扫描完成:")
-    print(f"  成功: {result.success}")
-    print(f"  失败: {result.failed}")
-    print(f"  跳过: {result.skipped}")
+    output_handler.info(f"\n扫描完成:")
+    output_handler.info(f"  成功: {result.success}")
+    output_handler.info(f"  失败: {result.failed}")
+    output_handler.info(f"  跳过: {result.skipped}")
     
     return {
         "success": result.success,
@@ -469,37 +484,37 @@ def main():
     
     # 加载配置
     try:
-        config = Config.from_yaml(config_path) if config_path else Config.from_yaml()
+        config = Config.from_yaml(config_path) if config_path else Config.from_yaml("config/config.yaml")
     except Exception as e:
         logger.error(f"Failed to load config: {e}")
-        print(f"错误: 加载配置文件失败 - {e}")
+        output_handler.error(f"错误: 加载配置文件失败 - {e}")
         return 1
     
     # 初始化系统
     try:
-        system = ArxivSurveySystem(config_path)
+        system = ArxivSurveySystem(config_path if config_path else "config/config.yaml")
     except Exception as e:
         logger.error(f"Failed to initialize system: {e}")
-        print(f"错误: 系统初始化失败 - {e}")
-        print("请检查配置文件和环境变量设置")
+        output_handler.error(f"错误: 系统初始化失败 - {e}")
+        output_handler.info("请检查配置文件和环境变量设置")
         return 1
     
     # 执行命令
     try:
         if args.paper:
             # 处理单篇论文
-            print(f"\n处理单篇论文: {args.paper}")
+            output_handler.info(f"\n处理单篇论文: {args.paper}")
             task = system.process_single_paper(args.paper)
             if task.is_successful():
-                print(f"✓ 论文处理成功: {task.arxiv_id}")
+                output_handler.info(f"论文处理成功: {task.arxiv_id}")
                 if task.zhihu_url:
-                    print(f"  知乎链接: {task.zhihu_url}")
+                    output_handler.info(f"  知乎链接: {task.zhihu_url}")
                 if task.local_path:
-                    print(f"  本地文件: {task.local_path}")
+                    output_handler.info(f"  本地文件: {task.local_path}")
             else:
-                print(f"✗ 论文处理失败: {task.arxiv_id}")
+                output_handler.error(f"论文处理失败: {task.arxiv_id}")
                 if task.error_message:
-                    print(f"  错误: {task.error_message}")
+                    output_handler.error(f"  错误: {task.error_message}")
                 return 1
         
         elif args.list:
@@ -507,78 +522,78 @@ def main():
             date_from = datetime.now() - timedelta(days=args.days)
             papers = system.list_processed_papers(date_from=date_from)
             
-            print(f"\n最近 {args.days} 天处理的论文 ({len(papers)} 篇):\n")
-            print(f"{'arXiv ID':<15} {'日期':<12} {'标题':<50}")
-            print("-" * 80)
+            output_handler.info(f"\n最近 {args.days} 天处理的论文 ({len(papers)} 篇):\n")
+            output_handler.info(f"{'arXiv ID':<15} {'日期':<12} {'标题':<50}")
+            output_handler.info("-" * 80)
             
             for p in papers:
                 date_str = p["published_date"][:10]
                 title = p["title"][:47] + "..." if len(p["title"]) > 50 else p["title"]
-                print(f"{p['arxiv_id']:<15} {date_str:<12} {title:<50}")
+                output_handler.info(f"{p['arxiv_id']:<15} {date_str:<12} {title:<50}")
         
         elif args.stats:
             # 显示统计信息
             stats = system.get_storage_stats()
             
-            print("\n=== 存储统计 ===\n")
-            print(f"总论文数: {stats['total_papers']}")
+            output_handler.info("\n=== 存储统计 ===\n")
+            output_handler.info(f"总论文数: {stats['total_papers']}")
             
             if stats['by_category']:
-                print("\n按分类统计:")
+                output_handler.info("\n按分类统计:")
                 for cat, count in sorted(stats['by_category'].items(), key=lambda x: -x[1]):
-                    print(f"  {cat}: {count}")
+                    output_handler.info(f"  {cat}: {count}")
             
             if stats['by_year']:
-                print("\n按年份统计:")
+                output_handler.info("\n按年份统计:")
                 for year, count in sorted(stats['by_year'].items(), key=lambda x: -x[0]):
-                    print(f"  {year}: {count}")
+                    output_handler.info(f"  {year}: {count}")
         
         elif args.check_zhihu:
             # 检查知乎登录状态
             if system.check_zhihu_login():
-                print("✓ 知乎登录状态正常")
+                output_handler.info("知乎登录状态正常")
             else:
-                print("✗ 知乎未登录或Cookie已过期")
-                print("  请更新 ZHIHU_COOKIE 环境变量或配置文件")
+                output_handler.error("知乎未登录或Cookie已过期")
+                output_handler.info("  请更新 ZHIHU_COOKIE 环境变量或配置文件")
                 return 1
         
         elif args.list_columns:
             # 列出知乎专栏
             columns = system.get_zhihu_columns()
             if columns:
-                print("\n知乎专栏列表:\n")
+                output_handler.info("\n知乎专栏列表:\n")
                 for col in columns:
-                    print(f"  ID: {col['id']}")
-                    print(f"  标题: {col['title']}")
-                    print(f"  描述: {col.get('description', 'N/A')}")
-                    print()
+                    output_handler.info(f"  ID: {col['id']}")
+                    output_handler.info(f"  标题: {col['title']}")
+                    output_handler.info(f"  描述: {col.get('description', 'N/A')}")
+                    output_handler.info("")
             else:
-                print("未找到专栏或Cookie无效")
+                output_handler.info("未找到专栏或Cookie无效")
         
         elif args.daemon:
             # 持续运行模式
-            print("启动定时任务模式，按 Ctrl+C 停止")
+            output_handler.info("启动定时任务模式，按 Ctrl+C 停止")
             system.run_continuous()
         
         elif args.scan:
             # 仅扫描和总结
-            print("\n执行论文扫描和总结...")
+            output_handler.info("\n执行论文扫描和总结...")
             result = scan_and_summarize(system)
             
-            print("\n" + "=" * 70)
-            print("✅ 扫描和总结完成")
-            print("=" * 70)
-            print(f"成功: {result['success']}, 失败: {result['failed']}, 跳过: {result['skipped']}")
+            output_handler.info("\n" + "=" * 70)
+            output_handler.info("扫描和总结完成")
+            output_handler.info("=" * 70)
+            output_handler.info(f"成功: {result['success']}, 失败: {result['failed']}, 跳过: {result['skipped']}")
             
             if result['failed'] > 0:
                 return 1
         
         elif args.publish:
             # 仅发布到知乎
-            print("\n执行知乎发布...")
-            print("=" * 70)
-            print("📤 步骤2: 发布到知乎专栏")
-            print("=" * 70)
+            output_handler.info("\n执行知乎发布...")
+            output_handler.info("=" * 70)
+            output_handler.info("步骤2: 发布到知乎专栏")
+            output_handler.info("=" * 70)
             
             # 获取未发布的论文
             unpublished = get_unpublished_papers(system.storage)
@@ -586,29 +601,29 @@ def main():
             # 发布到知乎
             result = publish_papers_to_zhihu(config, unpublished)
             
-            print("\n" + "=" * 70)
-            print("✅ 发布完成")
-            print("=" * 70)
-            print(f"成功: {result['success']}, 失败: {result['failed']}, 总计: {result['total']}")
+            output_handler.info("\n" + "=" * 70)
+            output_handler.info("发布完成")
+            output_handler.info("=" * 70)
+            output_handler.info(f"成功: {result['success']}, 失败: {result['failed']}, 总计: {result['total']}")
             
             if result['failed'] > 0:
                 return 1
         
-        else:
-            # 默认完整流程：扫描+总结+发布
-            print("\n执行完整流程：扫描+总结+发布...")
+        elif args.run_once:
+            # 完整流程：扫描+总结+发布
+            output_handler.info("\n执行完整流程：扫描+总结+发布...")
             
             # 步骤1: 扫描和总结
             scan_result = scan_and_summarize(system)
             
             if scan_result['success'] == 0 and scan_result['failed'] == 0:
-                print("\n没有新论文需要处理")
+                output_handler.info("\n没有新论文需要处理")
                 return 0
             
             # 步骤2: 发布到知乎
-            print("\n" + "=" * 70)
-            print("📤 步骤2: 发布到知乎专栏")
-            print("=" * 70)
+            output_handler.info("\n" + "=" * 70)
+            output_handler.info("步骤2: 发布到知乎专栏")
+            output_handler.info("=" * 70)
             
             # 获取未发布的论文（包括刚刚总结的）
             unpublished = get_unpublished_papers(system.storage)
@@ -616,21 +631,52 @@ def main():
             # 发布到知乎
             publish_result = publish_papers_to_zhihu(config, unpublished)
             
-            print("\n" + "=" * 70)
-            print("✅ 完整流程执行完成")
-            print("=" * 70)
-            print(f"\n扫描总结: 成功 {scan_result['success']}, 失败 {scan_result['failed']}")
-            print(f"知乎发布: 成功 {publish_result['success']}, 失败 {publish_result['failed']}")
+            output_handler.info("\n" + "=" * 70)
+            output_handler.info("完整流程执行完成")
+            output_handler.info("=" * 70)
+            output_handler.info(f"\n扫描总结: 成功 {scan_result['success']}, 失败 {scan_result['failed']}")
+            output_handler.info(f"知乎发布: 成功 {publish_result['success']}, 失败 {publish_result['failed']}")
+            
+            if scan_result['failed'] > 0 or publish_result['failed'] > 0:
+                return 1
+        
+        else:
+            # 默认完整流程：扫描+总结+发布
+            output_handler.info("\n执行完整流程：扫描+总结+发布...")
+            
+            # 步骤1: 扫描和总结
+            scan_result = scan_and_summarize(system)
+            
+            if scan_result['success'] == 0 and scan_result['failed'] == 0:
+                output_handler.info("\n没有新论文需要处理")
+                return 0
+            
+            # 步骤2: 发布到知乎
+            output_handler.info("\n" + "=" * 70)
+            output_handler.info("步骤2: 发布到知乎专栏")
+            output_handler.info("=" * 70)
+            
+            # 获取未发布的论文（包括刚刚总结的）
+            unpublished = get_unpublished_papers(system.storage)
+            
+            # 发布到知乎
+            publish_result = publish_papers_to_zhihu(config, unpublished)
+            
+            output_handler.info("\n" + "=" * 70)
+            output_handler.info("完整流程执行完成")
+            output_handler.info("=" * 70)
+            output_handler.info(f"\n扫描总结: 成功 {scan_result['success']}, 失败 {scan_result['failed']}")
+            output_handler.info(f"知乎发布: 成功 {publish_result['success']}, 失败 {publish_result['failed']}")
             
             if scan_result['failed'] > 0 or publish_result['failed'] > 0:
                 return 1
     
     except KeyboardInterrupt:
-        print("\n操作已取消")
+        output_handler.info("\n操作已取消")
         return 130
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
-        print(f"错误: {e}")
+        output_handler.error(f"错误: {e}")
         return 1
     
     return 0

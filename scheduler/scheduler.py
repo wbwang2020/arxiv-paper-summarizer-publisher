@@ -5,10 +5,12 @@ from datetime import datetime
 
 import schedule
 
-from config import SchedulerConfig
-from utils import get_logger
+from config import SchedulerConfig, Config
+from utils import get_logger, get_output_handler, get_log_level
 
 logger = get_logger()
+
+output_handler = None  # 延迟初始化
 
 
 class TaskScheduler:
@@ -19,6 +21,25 @@ class TaskScheduler:
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        
+        # 初始化输出处理器
+        global output_handler
+        if output_handler is None:
+            # 加载配置以获取输出设置
+            try:
+                full_config = Config.from_yaml("config/config.yaml")
+                scheduler_config = full_config.output.get_module_config("scheduler")
+                log_level = get_log_level(scheduler_config.log_level)
+                output_handler = get_output_handler(
+                    "scheduler", 
+                    logger, 
+                    debug=scheduler_config.debug, 
+                    log_level=log_level, 
+                    enable_debug=scheduler_config.enable_debug
+                )
+            except Exception as e:
+                # 如果加载失败，使用默认设置
+                output_handler = get_output_handler("scheduler", logger)
     
     def schedule_daily_task(
         self,
@@ -40,13 +61,13 @@ class TaskScheduler:
         """
         def job():
             try:
-                logger.info(f"在 {datetime.now()} 执行定时任务")
+                output_handler.info(f"在 {datetime.now()} 执行定时任务")
                 task_func(*args, **kwargs)
             except Exception as e:
-                logger.error(f"定时任务执行失败: {e}")
+                output_handler.error(f"定时任务执行失败: {e}")
         
         schedule.every().day.at(f"{hour:02d}:{minute:02d}").do(job)
-        logger.info(f"已设置每日定时任务: {hour:02d}:{minute:02d}")
+        output_handler.info(f"已设置每日定时任务: {hour:02d}:{minute:02d}")
     
     def schedule_cron_task(
         self,
@@ -77,18 +98,18 @@ class TaskScheduler:
         
         def job():
             try:
-                logger.info(f"在 {datetime.now()} 执行定时任务")
+                output_handler.info(f"在 {datetime.now()} 执行定时任务")
                 task_func(*args, **kwargs)
             except Exception as e:
-                logger.error(f"定时任务执行失败: {e}")
+                output_handler.error(f"定时任务执行失败: {e}")
         
         # 解析并设置调度
         job_scheduled = self._parse_cron_schedule(minute, hour, day, month, weekday, job)
         
         if job_scheduled:
-            logger.info(f"已设置Cron定时任务: {cron_expr}")
+            output_handler.info(f"已设置Cron定时任务: {cron_expr}")
         else:
-            logger.warning(f"无法解析Cron表达式: {cron_expr}")
+            output_handler.warning(f"无法解析Cron表达式: {cron_expr}")
     
     def _parse_cron_schedule(
         self,
@@ -144,7 +165,7 @@ class TaskScheduler:
             return False
             
         except Exception as e:
-            logger.error(f"解析Cron调度时出错: {e}")
+            output_handler.error(f"解析Cron调度时出错: {e}")
             return False
     
     def start(self, block: bool = False):
@@ -155,7 +176,7 @@ class TaskScheduler:
             block: 是否阻塞当前线程
         """
         if self.running:
-            logger.warning("调度器已在运行")
+            output_handler.warning("调度器已在运行")
             return
         
         self.running = True
@@ -166,28 +187,28 @@ class TaskScheduler:
         else:
             self.thread = threading.Thread(target=self._run_scheduler, daemon=True)
             self.thread.start()
-            logger.info("调度器已在后台线程启动")
+            output_handler.info("调度器已在后台线程启动")
     
     def _run_scheduler(self):
         """运行调度循环"""
-        logger.info("调度器循环已启动")
+        output_handler.info("调度器循环已启动")
         
         while self.running and not self._stop_event.is_set():
             try:
                 schedule.run_pending()
                 time.sleep(1)
             except Exception as e:
-                logger.error(f"调度器循环出错: {e}")
+                output_handler.error(f"调度器循环出错: {e}")
                 time.sleep(5)
         
-        logger.info("调度器循环已停止")
+        output_handler.info("调度器循环已停止")
     
     def stop(self):
         """停止调度器"""
         if not self.running:
             return
         
-        logger.info("正在停止调度器...")
+        output_handler.info("正在停止调度器...")
         self.running = False
         self._stop_event.set()
         
@@ -196,7 +217,7 @@ class TaskScheduler:
         
         # 清除所有任务
         schedule.clear()
-        logger.info("调度器已停止")
+        output_handler.info("调度器已停止")
     
     def get_next_run_time(self) -> Optional[datetime]:
         """

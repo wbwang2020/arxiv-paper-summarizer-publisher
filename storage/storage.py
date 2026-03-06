@@ -5,11 +5,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Set, Tuple
 
-from config import StorageConfig
+from config import StorageConfig, Config
 from models import ArxivPaper, PaperSummary
-from utils import get_logger, sanitize_filename
+from utils import get_logger, sanitize_filename, get_output_handler, get_log_level
 
 logger = get_logger()
+
+output_handler = None  # 延迟初始化
 
 
 class PaperStorage:
@@ -19,6 +21,25 @@ class PaperStorage:
         self.config = config
         self.base_dir = Path(config.base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 初始化输出处理器
+        global output_handler
+        if output_handler is None:
+            # 加载配置以获取输出设置
+            try:
+                full_config = Config.from_yaml("config/config.yaml")
+                storage_config = full_config.output.get_module_config("storage")
+                log_level = get_log_level(storage_config.log_level)
+                output_handler = get_output_handler(
+                    "storage", 
+                    logger, 
+                    debug=storage_config.debug, 
+                    log_level=log_level, 
+                    enable_debug=storage_config.enable_debug
+                )
+            except Exception as e:
+                # 如果加载失败，使用默认设置
+                output_handler = get_output_handler("storage", logger)
         
         # 创建根索引文件
         self.index_file = self.base_dir / "index.json"
@@ -71,7 +92,7 @@ class PaperStorage:
                 with open(brief_file, "r", encoding="utf-8") as f:
                     return json.load(f)
         except (json.JSONDecodeError, Exception) as e:
-            logger.warning(f"从 {brief_file} 加载简报时出错: {e}")
+            output_handler.warning(f"从 {brief_file} 加载简报时出错: {e}")
         return {"papers": {}}
     
     def _save_brief(self, dir_path: Path, brief: Dict):
@@ -86,9 +107,9 @@ class PaperStorage:
             
             with open(brief_file, "w", encoding="utf-8") as f:
                 json.dump(brief, f, ensure_ascii=False, indent=2, default=serialize_datetime)
-            logger.debug(f"简报已保存到 {brief_file}")
+            output_handler.debug_print(f"简报已保存到 {brief_file}")
         except Exception as e:
-            logger.error(f"保存简报到 {brief_file} 时出错: {e}")
+            output_handler.error(f"保存简报到 {brief_file} 时出错: {e}")
     
     def _generate_filename(self, paper: ArxivPaper, extension: str = "md") -> str:
         """生成文件名"""
@@ -279,7 +300,7 @@ class PaperStorage:
         
         self._save_brief(dir_path, brief)
         
-        logger.info(f"总结已保存到 {file_path}")
+        output_handler.info(f"总结已保存到 {file_path}")
         return str(file_path)
     
     def load_summary(self, arxiv_id: str) -> Optional[PaperSummary]:
@@ -332,7 +353,7 @@ class PaperStorage:
                 )
                 
         except Exception as e:
-            logger.error(f"加载 {arxiv_id} 的总结时出错: {e}")
+            output_handler.error(f"加载 {arxiv_id} 的总结时出错: {e}")
             return None
     
     def exists(self, arxiv_id: str) -> bool:
@@ -487,11 +508,11 @@ class PaperStorage:
             del index[arxiv_id]
             self._save_index(index)
             
-            logger.info(f"已删除 {arxiv_id} 的总结")
+            output_handler.info(f"已删除 {arxiv_id} 的总结")
             return True
             
         except Exception as e:
-            logger.error(f"删除 {arxiv_id} 的总结时出错: {e}")
+            output_handler.error(f"删除 {arxiv_id} 的总结时出错: {e}")
             return False
     
     def get_stats(self) -> Dict:
@@ -565,19 +586,19 @@ class PaperStorage:
             # 查找论文所在的文件夹
             info = self.get_paper_summary_info(arxiv_id, months=12)
             if not info:
-                logger.warning(f"无法更新发布状态: 未找到论文 {arxiv_id}")
+                output_handler.warning(f"无法更新发布状态: 未找到论文 {arxiv_id}")
                 return False
             
             folder_name = info.get("folder")
             if not folder_name:
-                logger.warning(f"无法更新发布状态: {arxiv_id} 的文件夹信息缺失")
+                output_handler.warning(f"无法更新发布状态: {arxiv_id} 的文件夹信息缺失")
                 return False
             
             folder_path = self.base_dir / folder_name
             brief = self._load_brief(folder_path)
             
             if arxiv_id not in brief.get("papers", {}):
-                logger.warning(f"无法更新发布状态: {arxiv_id} 不在简报中")
+                output_handler.warning(f"无法更新发布状态: {arxiv_id} 不在简报中")
                 return False
             
             # 更新发布状态
@@ -591,11 +612,11 @@ class PaperStorage:
             self._save_brief(folder_path, brief)
             
             status = "已发布" if published else "未发布"
-            logger.info(f"已更新 {arxiv_id} 的知乎发布状态: {status}")
+            output_handler.info(f"已更新 {arxiv_id} 的知乎发布状态: {status}")
             return True
             
         except Exception as e:
-            logger.error(f"更新 {arxiv_id} 的发布状态时出错: {e}")
+            output_handler.error(f"更新 {arxiv_id} 的发布状态时出错: {e}")
             return False
     
     def is_zhihu_published(self, arxiv_id: str, months: int = 2) -> bool:

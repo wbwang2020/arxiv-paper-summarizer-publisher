@@ -1,263 +1,281 @@
-# ArXiv 文献自动总结系统配置文件
-
 arxiv:
-  # 搜索关键词（OR关系）
-  keywords:
-    # - "你的关键词1"
-    # - "你的关键词2"
-  
-  # arXiv分类（AND关系）
+  keywords: [world model]
   categories:
-    - "cs.LG"      # 机器学习
-    - "cs.AI"      # 人工智能
-  
-  # 扫描最近N天的论文
+  - cs.LG
+  - cs.AI
   days_back: 14
-  
-  # 每次最大获取数量
   max_results: 10
-  
-  # 排序方式: submittedDate, lastUpdatedDate, relevance
-  sort_by: "submittedDate"
-  
-  # 排序顺序: ascending, descending
-  sort_order: "descending"
-
+  sort_by: submittedDate
+  sort_order: descending
 ai:
-  # AI提供商: deepseek, openai, claude
-  provider: "deepseek"
-  
-  # API密钥（支持环境变量语法: ${ENV_VAR_NAME}）
-  api_key: "${DEEPSEEK_API_KEY}"
-  
-  # API地址
-  api_url: "https://api.deepseek.com/v1/chat/completions"
-  
-  # 模型名称
-  model: "deepseek-chat"
-  
-  # 温度参数 (0.0-1.0)
+  provider: deepseek
+  api_key: sk-ff4e23fb5d3946208902a83b58c412cc
+  api_url: https://api.deepseek.com/v1/chat/completions
+  model: deepseek-chat
   temperature: 0.7
-  
-  # 最大token数
   max_tokens: 8000
-  
-  # 最大输入token数 (128k)
   max_input_tokens: 131072
-  
-  # 请求超时时间(秒)
   timeout: 300
-  
-  # 系统提示词
-  system_prompt: |
-    你是一个专业的学术论文分析助手，擅长深度解析计算机科学和人工智能领域的学术论文。
+  system_prompt: '你是一个专业的学术论文分析助手，擅长深度解析计算机科学和人工智能领域的学术论文。
+
     你的任务是阅读论文并生成结构化的详细综述，帮助研究人员快速理解论文的核心内容。
+
     请确保分析全面、准确、客观，并突出论文的创新点和潜在价值。
-  
-  # 提示词模板
-  prompt_template: |
-    请对以下论文进行详细分析，并按照指定格式生成综述。
+
+    '
+  prompt_template: '请对以下论文进行详细分析，并按照指定格式生成综述。
+
 
     【论文基本信息】
+
     - 标题：{title}
+
     - 作者：{authors}
+
     - 发表年份：{year}
+
     - arXiv ID：{arxiv_id}
 
+
     【论文摘要】
+
     {abstract}
 
+
     【论文全文】
+
     {content}
+
 
     请按照以下结构生成详细综述，每个部分使用二级标题（##）标记：
 
+
     ## 1. 基本信息
+
     必须包括以下信息：
+
     - **论文标题**: 完整论文标题
+
     - **作者**: 所有作者姓名
+
     - **作者单位**: 每个作者所属的机构/单位（如果有）
+
     - **发表年份**: 论文发表年份
+
     - **期刊/会议名称**: 发表的期刊或会议名称（如果是arXiv预印本，标注为arXiv）
+
     - **DOI**: 论文DOI（如果有）
 
+
     ## 2. 研究动机（着重分析）
+
     清晰阐述本研究旨在解决的核心科学问题或技术瓶颈，阐述论文所讨论问题的驱动原因（motivation）。若是综述文章，则分析是否存在研究方向的启发式论述。
 
+
     ## 3. 核心假设
+
     明确列出作者提出的核心研究假设或理论构想。
 
+
     ## 4. 研究设计（使用长篇幅着重分析）
+
     概述整体研究思路（如：理论推导、仿真模拟、实验验证、案例研究等），请详细阐述文章的理论模型构建过程，其中包括核心理论公式的意义（着重分析），引理、定理、推论的形成过程。如果是综述文章的话，则着重分析方法的演化进程。
+
     注意使用"$...$"分割符区分公式。
 
+
     ## 5. 数据/样本来源
+
     说明数据获取方式、样本规模、选择标准与特征。
 
+
     ## 6. 方法与技术（若不是综述文章，则使用长篇幅着重分析）
+
     详述所使用的关键技术、算法、模型、实验平台、或软件工具，着重阐述算法的构建细节。
 
+
     ## 7. 分析流程
+
     分步说明实验步骤、仿真流程或理论推导的关键环节，阐述对比实验中算法的选择情况和消融实验中各模型的选择要点，以及其他实验分析部分的设计情况。
 
+
     ## 8. 数据分析
+
     说明所采用的统计方法、有效性验证手段或性能评价指标。
 
+
     ## 9. 核心发现
+
     提炼研究中最重要、最创新的科学发现或观测现象。
 
+
     ## 10. 实验结果
+
     总结关键的定量结果（如：性能指标、统计显著性）和定性结论。
 
+
     ## 11. 辅助结果
+
     简述其他支持性的次要结果。
 
+
     ## 12. 结论
+
     归纳作者基于证据得出的最终结论。
 
+
     ## 13. 贡献
+
     评价本研究在理论创新、技术突破、方法改进或应用拓展方面对本文章相关领域的具体贡献。
 
+
     ## 14. 与研究主题的关联
+
     分析该工作与我的研究主题或综述方向的核心关联。
 
+
     ## 15. 亮点
+
     从批判性思维角度出发，指出其值得在综述中重点讨论的亮点（如：开创性、争议性、局限性、未来启示）。
 
+
     ## 16. 图表信息
+
     列出文中所有Figure和Table的编号、标题及其所展示的核心内容概述，方便快速定位和引用关键证据。
 
+
     ## 17. 评价
+
     从论文审稿人的角度，阐述您对该研究的方法严谨性、逻辑完备性和结论可靠性的个人评价。
 
+
     ## 18. 疑问
+
     阅读中产生的疑问或认为其存在的不足之处。
 
+
     ## 19. 启发
+
     该研究为您带来的新思路、新想法或未来可探索的方向。
 
+
     ## 20. 参考文献
+
     列出文中引用的1-2篇最具代表性的参考文献（格式为：作者，年份，标题），方便追踪重要学术渊源。
 
+
     ---
+
     请确保输出格式规范，内容详实，分析深入。如果某些部分在论文中没有明确提及，请标注"文中未明确说明"。
 
-  # 章节定义 - 用于解析AI响应
+    '
   summary_sections:
-    - section_number: "2"
-      field_name: "motivation"
-      description: "研究动机"
-    - section_number: "3"
-      field_name: "core_hypothesis"
-      description: "核心假设"
-    - section_number: "4"
-      field_name: "research_design"
-      description: "研究设计"
-    - section_number: "5"
-      field_name: "data_source"
-      description: "数据/样本来源"
-    - section_number: "6"
-      field_name: "methods"
-      description: "方法与技术"
-    - section_number: "7"
-      field_name: "analysis_process"
-      description: "分析流程"
-    - section_number: "8"
-      field_name: "data_analysis"
-      description: "数据分析"
-    - section_number: "9"
-      field_name: "core_findings"
-      description: "核心发现"
-    - section_number: "10"
-      field_name: "experimental_results"
-      description: "实验结果"
-    - section_number: "11"
-      field_name: "supporting_results"
-      description: "辅助结果"
-    - section_number: "12"
-      field_name: "conclusions"
-      description: "结论"
-    - section_number: "13"
-      field_name: "contributions"
-      description: "贡献"
-    - section_number: "14"
-      field_name: "relevance"
-      description: "与研究主题的关联"
-    - section_number: "15"
-      field_name: "highlights"
-      description: "亮点"
-    - section_number: "16"
-      field_name: "figures_tables"
-      description: "图表信息"
-      field_type: "list"
-    - section_number: "17"
-      field_name: "evaluation"
-      description: "评价"
-    - section_number: "18"
-      field_name: "questions"
-      description: "疑问"
-    - section_number: "19"
-      field_name: "inspiration"
-      description: "启发"
-    - section_number: "20"
-      field_name: "references"
-      description: "参考文献"
-      field_type: "list"
-
+  - description: 研究动机
+    field_name: motivation
+    section_number: '2'
+  - description: 核心假设
+    field_name: core_hypothesis
+    section_number: '3'
+  - description: 研究设计
+    field_name: research_design
+    section_number: '4'
+  - description: 数据/样本来源
+    field_name: data_source
+    section_number: '5'
+  - description: 方法与技术
+    field_name: methods
+    section_number: '6'
+  - description: 分析流程
+    field_name: analysis_process
+    section_number: '7'
+  - description: 数据分析
+    field_name: data_analysis
+    section_number: '8'
+  - description: 核心发现
+    field_name: core_findings
+    section_number: '9'
+  - description: 实验结果
+    field_name: experimental_results
+    section_number: '10'
+  - description: 辅助结果
+    field_name: supporting_results
+    section_number: '11'
+  - description: 结论
+    field_name: conclusions
+    section_number: '12'
+  - description: 贡献
+    field_name: contributions
+    section_number: '13'
+  - description: 与研究主题的关联
+    field_name: relevance
+    section_number: '14'
+  - description: 亮点
+    field_name: highlights
+    section_number: '15'
+  - description: 图表信息
+    field_name: figures_tables
+    field_type: list
+    section_number: '16'
+  - description: 评价
+    field_name: evaluation
+    section_number: '17'
+  - description: 疑问
+    field_name: questions
+    section_number: '18'
+  - description: 启发
+    field_name: inspiration
+    section_number: '19'
+  - description: 参考文献
+    field_name: references
+    field_type: list
+    section_number: '20'
 storage:
-  # 本地存储根目录
-  base_dir: "./papers"
-  
-  # 存储格式: markdown, json
-  format: "markdown"
-  
-  # 文件名模板: {date}, {arxiv_id}, {title}, {category}
-  filename_template: "{date}_{arxiv_id}_{title}"
-  
-  # 组织方式: date, category, flat
-  organize_by: "date"
-  
-  # 是否包含元数据
+  base_dir: ./papers
+  format: markdown
+  filename_template: '{date}_{arxiv_id}_{title}'
+  organize_by: date
   include_metadata: false
-
 zhihu:
-  # 是否启用知乎发布
   enabled: true
-  
-  # 知乎Cookie
-  cookie: "${ZHIHU_COOKIE}"
-  
-  # 知乎专栏配置（两种方式，优先级: column_id > column_name）
-  # 方式1: 直接指定专栏ID
-  # column_id: "你的专栏ID"
-  
-  # 方式2: 通过专栏名称搜索（支持部分匹配）
-  # 系统会优先搜索当前用户的专栏，找不到则搜索所有专栏
-  # column_name: "你的专栏名称"
-  
-  # 专栏不存在时是否自动创建（需要column_name配置）
+  cookie: _xsrf=c394cc9e-6520-482f-aeed-12f5d898376d; z_c0=2|1:0|10:1772448950|4:z_c0|92:Mi4xOVJiNlJBQUFBQUJXZ1ZSREVVeUhHeVlBQUFCZ0FsVk40UUZfYWdCZC1uRzFHWm1HZ011TWI4UUVwWGxDUjZJTldR|9c70a17de61efa5c6278c59ef7046f5487b4eb772822b622c383912ad15d6a9e;
+    d_c0=VoFUQxFMhxuPTkYhg2iXoge63dyEJxOLZ2Y=|1765716105; SESSIONID=9Ngi3ExNIQTb7j3jOLCPuYjnqtXyvVPSiSQFdraUfml
+  column_name: ''
   create_column_if_not_exists: false
-  
-  # 先保存为草稿
   draft_first: false
-  
-  # 是否自动发布（false则保存为草稿）
   auto_publish: true
-  
-  # 正文填充模式: copy_paste（拷贝粘贴）, import_document（导入文档）
-  content_fill_mode: "import_document"
-  
-  # 调试模式: true（调试模式，输出详细日志和生成截图）, false（执行模式，简洁输出）
+  content_fill_mode: import_document
   debug: false
-
 scheduler:
-  # 是否启用定时任务
+  cron: 0 9 * * *
   enabled: true
-  
-  # Cron表达式 (分 时 日 月 周)
-  # 每天上午9点: "0 9 * * *"
-  # 每周一上午9点: "0 9 * * 1"
-  cron: "0 9 * * *"
-  
-  # 时区
-  timezone: "Asia/Shanghai"
+  timezone: Asia/Shanghai
+output:
+  modules:
+    main: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    core: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    scanner: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    summarizer: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    storage: 
+      debug: false
+      log_level: INFO
+      enable_debug: false
+    publisher: 
+      debug: true
+      log_level: INFO
+      enable_debug: true
+    scheduler: 
+      debug: false
+      log_level: INFO
+      enable_debug: false

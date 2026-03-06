@@ -13,9 +13,10 @@ try:
 except ImportError:
     PYPDF2_AVAILABLE = False
 
-from utils import get_logger
+from utils import get_logger, get_output_handler
 
 logger = get_logger()
+output_handler = get_output_handler(logger)
 
 
 class PDFExtractor:
@@ -31,11 +32,11 @@ class PDFExtractor:
         self.preferred_method = preferred_method
         
         if preferred_method == "pdfplumber" and not PDFPLUMBER_AVAILABLE:
-            logger.warning("pdfplumber不可用，回退到PyPDF2")
+            output_handler.warning("pdfplumber不可用，回退到PyPDF2")
             self.preferred_method = "pypdf2" if PYPDF2_AVAILABLE else None
         
         if preferred_method == "pypdf2" and not PYPDF2_AVAILABLE:
-            logger.warning("PyPDF2不可用，回退到pdfplumber")
+            output_handler.warning("PyPDF2不可用，回退到pdfplumber")
             self.preferred_method = "pdfplumber" if PDFPLUMBER_AVAILABLE else None
     
     def extract_text(self, pdf_path: str, max_pages: Optional[int] = None) -> str:
@@ -69,7 +70,7 @@ class PDFExtractor:
                 total_pages = len(pdf.pages)
                 pages_to_extract = min(max_pages or total_pages, total_pages)
                 
-                logger.debug(f"使用pdfplumber从 {pages_to_extract} 页提取文本")
+                output_handler.debug_print(f"使用pdfplumber从 {pages_to_extract} 页提取文本")
                 
                 for i, page in enumerate(pdf.pages[:pages_to_extract]):
                     page_text = page.extract_text()
@@ -77,7 +78,7 @@ class PDFExtractor:
                         text_parts.append(page_text)
         
         except Exception as e:
-            logger.error(f"使用pdfplumber提取文本时出错: {e}")
+            output_handler.error(f"使用pdfplumber提取文本时出错: {e}")
             raise
         
         return "\n\n".join(text_parts)
@@ -93,7 +94,7 @@ class PDFExtractor:
                 total_pages = len(reader.pages)
                 pages_to_extract = min(max_pages or total_pages, total_pages)
                 
-                logger.debug(f"使用PyPDF2从 {pages_to_extract} 页提取文本")
+                output_handler.debug_print(f"使用PyPDF2从 {pages_to_extract} 页提取文本")
                 
                 for i in range(pages_to_extract):
                     page = reader.pages[i]
@@ -102,7 +103,7 @@ class PDFExtractor:
                         text_parts.append(text)
         
         except Exception as e:
-            logger.error(f"使用PyPDF2提取文本时出错: {e}")
+            output_handler.error(f"使用PyPDF2提取文本时出错: {e}")
             raise
         
         return "\n\n".join(text_parts)

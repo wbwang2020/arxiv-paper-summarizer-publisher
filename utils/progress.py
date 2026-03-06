@@ -70,11 +70,11 @@ class PaperProgress:
     """论文处理进度显示"""
     
     STEPS = [
-        ("📥", "下载PDF"),
-        ("📄", "提取文本"),
-        ("🤖", "AI总结"),
-        ("💾", "保存本地"),
-        ("📤", "发布知乎"),
+        ("", "下载PDF"),
+        ("", "提取文本"),
+        ("", "AI总结"),
+        ("", "保存本地"),
+        ("", "发布知乎"),
     ]
     
     def __init__(self, arxiv_id: str, total_steps: int = 5):
@@ -100,21 +100,21 @@ class PaperProgress:
         """完成当前步骤"""
         elapsed = time.time() - self.step_start_time
         if message:
-            print(f"✅ 完成: {message} (耗时: {elapsed:.1f}s)")
+            print(f"完成: {message} (耗时: {elapsed:.1f}s)")
         else:
-            print(f"✅ 完成 (耗时: {elapsed:.1f}s)")
+            print(f"完成 (耗时: {elapsed:.1f}s)")
             
     def error(self, message: str):
         """显示错误"""
-        print(f"❌ 错误: {message}")
+        print(f"错误: {message}")
         
     def info(self, message: str):
         """显示信息"""
-        print(f"ℹ️  {message}")
+        print(f"{message}")
         
     def warning(self, message: str):
         """显示警告"""
-        print(f"⚠️  {message}")
+        print(f"警告: {message}")
 
 
 class BatchProgress:
@@ -153,13 +153,13 @@ class BatchProgress:
         elapsed = time.time() - self.start_time
         
         print(f"\n{'='*70}")
-        print(f"📊 处理完成总结")
+        print(f"处理完成总结")
         print(f"{'='*70}")
         print(f"  总计: {self.total_papers} 篇论文")
-        print(f"  ✅ 成功: {self.success}")
-        print(f"  ❌ 失败: {self.failed}")
-        print(f"  ⏭️  跳过: {self.skipped}")
-        print(f"  ⏱️  总耗时: {elapsed:.1f}s")
+        print(f"  成功: {self.success}")
+        print(f"  失败: {self.failed}")
+        print(f"  跳过: {self.skipped}")
+        print(f"  总耗时: {elapsed:.1f}s")
         print(f"{'='*70}")
 
 
@@ -179,7 +179,7 @@ def progress_spinner(message: str):
             sys.stdout.flush()
             time.sleep(0.1)
             i += 1
-        sys.stdout.write(f"\r✓ {message}\n")
+        sys.stdout.write(f"\r{message}\n")
         sys.stdout.flush()
     
     thread = threading.Thread(target=spin)
