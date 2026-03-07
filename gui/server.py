@@ -14,6 +14,7 @@ import atexit
 import signal
 import time
 import platform
+import threading
 from pathlib import Path
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
@@ -44,8 +45,21 @@ is_processing = False
 # 服务器实例ID（用于前端检测服务器重启）
 SERVER_ID = str(time.time())
 
+# 服务器运行标志（用于优雅退出）
+server_running = True
+
 # PID文件路径
 PID_FILE_PATH = BASE_DIR / "gui_server.pid"
+
+# 输出缓冲区（用于网页重新打开时恢复输出）
+output_buffer = []
+output_buffer_lock = threading.Lock()
+
+def cleanup_output_buffer():
+    """清理输出缓冲区"""
+    global output_buffer
+    with output_buffer_lock:
+        output_buffer.clear()
 
 
 class SingleInstanceManager:
@@ -251,7 +265,7 @@ def index():
 @app.route('/api/run', methods=['POST'])
 def run_main():
     """执行main.py命令"""
-    global current_process, is_processing
+    global current_process, is_processing, output_buffer
     
     # 检查是否已有进程在运行
     if is_processing:
@@ -273,6 +287,10 @@ def run_main():
         # 标记为处理中
         is_processing = True
         
+        # 清空输出缓冲区
+        with output_buffer_lock:
+            output_buffer.clear()
+        
         # 启动进程
         current_process = subprocess.Popen(
             cmd,
@@ -287,15 +305,22 @@ def run_main():
         )
         
         def generate():
-            global is_processing, current_process
+            global is_processing, current_process, output_buffer
             try:
                 for line in current_process.stdout:
+                    # 写入缓冲区
+                    with output_buffer_lock:
+                        output_buffer.append(line)
                     yield line
                 current_process.wait()
             finally:
                 # 处理完成，重置状态
                 is_processing = False
                 current_process = None
+                
+                # 清空输出缓冲区
+                with output_buffer_lock:
+                    output_buffer.clear()
         
         return Response(generate(), mimetype='text/plain')
     
@@ -493,18 +518,24 @@ def check_zhihu():
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """获取处理状态"""
-    global is_processing, current_process, SERVER_ID
+    global is_processing, current_process, SERVER_ID, output_buffer
+    
+    # 获取缓冲的输出
+    with output_buffer_lock:
+        buffered_output = list(output_buffer)
+    
     return jsonify({
         'is_processing': is_processing,
         'has_process': current_process is not None,
-        'server_id': SERVER_ID
+        'server_id': SERVER_ID,
+        'output_buffer': buffered_output
     })
 
 
 @app.route('/api/stop', methods=['POST'])
 def stop_process():
     """停止当前处理进程"""
-    global current_process, is_processing
+    global current_process, is_processing, output_buffer
     
     if not current_process:
         return jsonify({'error': '没有正在运行的处理进程'}), 400
@@ -541,6 +572,11 @@ def stop_process():
         
         is_processing = False
         current_process = None
+        
+        # 清空输出缓冲区
+        with output_buffer_lock:
+            output_buffer.clear()
+        
         return jsonify({'status': 'ok'})
     except ImportError:
         try:
@@ -594,8 +630,16 @@ def handle_output_config():
 
 def signal_handler(signum, frame):
     """信号处理函数"""
+    global server_running
     print(f"\n接收到信号 {signum}，正在关闭服务器...")
+    
+    # 设置退出标志
+    server_running = False
+    
+    # 清理单实例锁
     single_instance_manager.cleanup()
+    
+    # 退出程序（Flask会自动停止）
     sys.exit(0)
 
 

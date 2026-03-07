@@ -1,15 +1,16 @@
 arxiv:
-  keywords: [world model]
+  keywords:
+  - world model
   categories:
   - cs.LG
   - cs.AI
   days_back: 14
-  max_results: 10
+  max_results: 5
   sort_by: submittedDate
   sort_order: descending
 ai:
   provider: deepseek
-  api_key: sk-ff4e23fb5d3946208902a83b58c412cc
+  api_key: ${DEEPSEEK_API_KEY}
   api_url: https://api.deepseek.com/v1/chat/completions
   model: deepseek-chat
   temperature: 0.7
@@ -69,7 +70,7 @@ ai:
 
     ## 2. 研究动机（着重分析）
 
-    清晰阐述本研究旨在解决的核心科学问题或技术瓶颈，阐述论文所讨论问题的驱动原因（motivation）。若是综述文章，则分析是否存在研究方向的启发式论述。
+    清晰阐述本研究旨在解决的核心科学问题或技术瓶颈，阐述论文所讨论问题的motivation。若是综述文章，则分析是否存在研究方向的启发式论述。
 
 
     ## 3. 核心假设
@@ -79,7 +80,7 @@ ai:
 
     ## 4. 研究设计（使用长篇幅着重分析）
 
-    概述整体研究思路（如：理论推导、仿真模拟、实验验证、案例研究等），请详细阐述文章的理论模型构建过程，其中包括核心理论公式的意义（着重分析），引理、定理、推论的形成过程。如果是综述文章的话，则着重分析方法的演化进程。
+    概述整体模型构型和理论推导的构建思路，请详细阐述文章的理论模型构建过程，着重分析核心理论公式的意义，以及各引理、定理、推论的形成过程。如果是综述文章的话，则着重分析方法的演化进程。
 
     注意使用"$...$"分割符区分公式。
 
@@ -96,7 +97,7 @@ ai:
 
     ## 7. 分析流程
 
-    分步说明实验步骤、仿真流程或理论推导的关键环节，阐述对比实验中算法的选择情况和消融实验中各模型的选择要点，以及其他实验分析部分的设计情况。
+    分步说明实验步骤、仿真或实验流程，阐述对比实验中算法的选择情况和消融实验中各模型的选择要点，以及其他实验分析部分的设计情况。
 
 
     ## 8. 数据分析
@@ -126,7 +127,7 @@ ai:
 
     ## 13. 贡献
 
-    评价本研究在理论创新、技术突破、方法改进或应用拓展方面对本文章相关领域的具体贡献。
+    以苛刻的视角，评价本研究在理论创新、技术突破、方法改进或应用拓展方面对本文章相关领域的具体贡献。
 
 
     ## 14. 与研究主题的关联
@@ -136,17 +137,17 @@ ai:
 
     ## 15. 亮点
 
-    从批判性思维角度出发，指出其值得在综述中重点讨论的亮点（如：开创性、争议性、局限性、未来启示）。
+    模仿一个审稿人的身份，从批判性思维角度出发，指出其值得在综述中重点讨论的亮点（如：开创性、争议性、局限性、未来启示）。
 
 
     ## 16. 图表信息
 
-    列出文中所有Figure和Table的编号、标题及其所展示的核心内容概述，方便快速定位和引用关键证据。
+    列出文中重要的Figure和Table的编号、标题及其所展示的核心内容概述，方便快速定位和引用关键证据。
 
 
     ## 17. 评价
 
-    从论文审稿人的角度，阐述您对该研究的方法严谨性、逻辑完备性和结论可靠性的个人评价。
+    从论文审稿人的角度出发，以苛刻的视角，阐述您对该研究的方法严谨性、逻辑完备性和结论可靠性的个人评价。
 
 
     ## 18. 疑问
@@ -161,7 +162,7 @@ ai:
 
     ## 20. 参考文献
 
-    列出文中引用的1-2篇最具代表性的参考文献（格式为：作者，年份，标题），方便追踪重要学术渊源。
+    列出文中引用的1-2篇最具代表性的参考文献，格式为：“作者，年份，标题”，方便追踪重要学术渊源。
 
 
     ---
@@ -237,8 +238,7 @@ storage:
   include_metadata: false
 zhihu:
   enabled: true
-  cookie: _xsrf=c394cc9e-6520-482f-aeed-12f5d898376d; z_c0=2|1:0|10:1772448950|4:z_c0|92:Mi4xOVJiNlJBQUFBQUJXZ1ZSREVVeUhHeVlBQUFCZ0FsVk40UUZfYWdCZC1uRzFHWm1HZ011TWI4UUVwWGxDUjZJTldR|9c70a17de61efa5c6278c59ef7046f5487b4eb772822b622c383912ad15d6a9e;
-    d_c0=VoFUQxFMhxuPTkYhg2iXoge63dyEJxOLZ2Y=|1765716105; SESSIONID=9Ngi3ExNIQTb7j3jOLCPuYjnqtXyvVPSiSQFdraUfml
+  cookie: ${ZHIHU_COOKIE}
   column_name: ''
   create_column_if_not_exists: false
   draft_first: false
@@ -249,33 +249,3 @@ scheduler:
   cron: 0 9 * * *
   enabled: true
   timezone: Asia/Shanghai
-output:
-  modules:
-    main: 
-      debug: false
-      log_level: INFO
-      enable_debug: false
-    core: 
-      debug: false
-      log_level: INFO
-      enable_debug: false
-    scanner: 
-      debug: false
-      log_level: INFO
-      enable_debug: false
-    summarizer: 
-      debug: false
-      log_level: INFO
-      enable_debug: false
-    storage: 
-      debug: false
-      log_level: INFO
-      enable_debug: false
-    publisher: 
-      debug: true
-      log_level: INFO
-      enable_debug: true
-    scheduler: 
-      debug: false
-      log_level: INFO
-      enable_debug: false

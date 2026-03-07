@@ -302,6 +302,19 @@ textarea:focus {
     display: block;
 }
 
+/* 配置禁用状态 */
+.config-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.config-disabled input,
+.config-disabled select,
+.config-disabled textarea {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+}
+
 /* AI配置子标签 */
 .ai-config-tabs {
     display: flex;
@@ -585,6 +598,51 @@ textarea:focus {
     justify-content: space-between;
     font-size: 13px;
     color: #666;
+}
+
+/* 系统状态样式 */
+#systemStatus {
+    font-weight: 500;
+    padding: 4px 12px;
+    border-radius: 4px;
+    transition: all 0.3s;
+}
+
+#systemStatus.ready {
+    color: #52c41a;
+    background: #f6ffed;
+    border: 1px solid #b7eb8f;
+}
+
+#systemStatus.processing {
+    color: #1890ff;
+    background: #e6f7ff;
+    border: 1px solid #91d5ff;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* 连接状态样式 */
+#lastUpdate {
+    padding: 4px 12px;
+    border-radius: 4px;
+    transition: all 0.3s;
+}
+
+#lastUpdate.connected {
+    color: #52c41a;
+    background: #f6ffed;
+    border: 1px solid #b7eb8f;
+}
+
+#lastUpdate.disconnected {
+    color: #ff4d4f;
+    background: #fff2f0;
+    border: 1px solid #ffa39e;
 }
 
 /* 弹窗样式 */

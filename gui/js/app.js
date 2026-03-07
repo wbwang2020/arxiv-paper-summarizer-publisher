@@ -15,6 +15,48 @@ let editingSectionIndex = -1;
 let isProcessing = false;
 let currentServerId = null;
 
+// 心跳机制变量
+let heartbeatInterval = null;
+let lastHeartbeatTime = 0;
+const HEARTBEAT_INTERVAL = 2000; // 心跳间隔2秒
+const HEARTBEAT_TIMEOUT = 5000;  // 心跳超时5秒
+
+// 从localStorage恢复处理状态
+function restoreProcessingState() {
+    const savedState = localStorage.getItem('isProcessing');
+    if (savedState === 'true') {
+        isProcessing = true;
+    }
+}
+
+// 保存处理状态到localStorage
+function saveProcessingState(processing) {
+    localStorage.setItem('isProcessing', processing);
+}
+
+// 更新配置控件的禁用状态
+function updateConfigControlsState(disabled) {
+    const configSection = document.getElementById('config');
+    if (!configSection) return;
+    
+    // 禁用/启用所有配置输入控件
+    const inputs = configSection.querySelectorAll('input, select, textarea, button');
+    inputs.forEach(input => {
+        // 保存按钮除外
+        if (input.type === 'submit' || input.textContent === '保存配置') {
+            return;
+        }
+        input.disabled = disabled;
+    });
+    
+    // 添加/移除禁用样式
+    if (disabled) {
+        configSection.classList.add('config-disabled');
+    } else {
+        configSection.classList.remove('config-disabled');
+    }
+}
+
 // 检查服务器是否重启，如果是则清除输出缓存
 async function checkServerRestart() {
     try {
@@ -25,8 +67,10 @@ async function checkServerRestart() {
         const lastServerId = localStorage.getItem('serverId');
         
         if (lastServerId && lastServerId !== serverId) {
-            console.log('检测到服务器重启，清除输出缓存');
+            console.log('检测到服务器重启，清除输出缓存和处理状态');
             localStorage.removeItem('outputCache');
+            localStorage.removeItem('isProcessing'); // 清除处理状态
+            isProcessing = false;
         }
         
         localStorage.setItem('serverId', serverId);
@@ -36,9 +80,34 @@ async function checkServerRestart() {
     }
 }
 
+// 保存运行控制状态
+function saveControlState() {
+    const runMode = document.querySelector('input[name="runMode"]:checked')?.value || '--run-once';
+    const verboseMode = document.getElementById('verboseMode')?.checked || false;
+    localStorage.setItem('runMode', runMode);
+    localStorage.setItem('verboseMode', verboseMode);
+}
+
+// 加载运行控制状态
+function loadControlState() {
+    const runMode = localStorage.getItem('runMode') || '--run-once';
+    const verboseMode = localStorage.getItem('verboseMode') === 'true';
+    
+    const runModeRadio = document.querySelector(`input[name="runMode"][value="${runMode}"]`);
+    if (runModeRadio) {
+        runModeRadio.checked = true;
+    }
+    
+    const verboseCheckbox = document.getElementById('verboseMode');
+    if (verboseCheckbox) {
+        verboseCheckbox.checked = verboseMode;
+    }
+}
+
 // 初始化
 document.addEventListener('DOMContentLoaded', async function() {
     await checkServerRestart(); // 先检查服务器是否重启
+    restoreProcessingState(); // 恢复处理状态
     
     initTabs();
     initConfigTabs();
@@ -47,7 +116,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     loadPapers();
     loadStats();
     loadOperations();
+    loadControlState(); // 加载运行控制状态
     loadOutputCache(); // 加载缓存的输出内容
+    
+    // 恢复配置控件的禁用状态
+    updateConfigControlsState(isProcessing);
+    
+    // 初始化系统状态显示
+    updateSystemStatus();
+    
+    // 初始化连接状态为断开（等待首次检查）
+    updateConnectionStatus(false);
     
     // 温度滑块事件
     const temperatureSlider = document.getElementById('temperature');
@@ -57,9 +136,130 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
     
-    // 定期检查处理状态
-    setInterval(checkProcessingStatus, 2000);
+    // 运行控制状态变化监听
+    const runModeRadios = document.querySelectorAll('input[name="runMode"]');
+    runModeRadios.forEach(radio => {
+        radio.addEventListener('change', saveControlState);
+    });
+    
+    const verboseCheckbox = document.getElementById('verboseMode');
+    if (verboseCheckbox) {
+        verboseCheckbox.addEventListener('change', saveControlState);
+    }
+    
+    // 启动心跳机制
+    startHeartbeat();
+    
+    // 页面可见性变化时处理心跳
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 });
+
+// ==================== 心跳机制 ====================
+
+function startHeartbeat() {
+    // 启动心跳检测
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+    }
+    
+    // 立即执行一次
+    doHeartbeat();
+    
+    // 定期执行心跳
+    heartbeatInterval = setInterval(doHeartbeat, HEARTBEAT_INTERVAL);
+}
+
+function stopHeartbeat() {
+    // 停止心跳检测
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+}
+
+async function doHeartbeat() {
+    // 执行心跳检测
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000); // 3秒超时
+        
+        const response = await fetch(`${API_BASE}/status`, {
+            signal: controller.signal,
+            cache: 'no-cache' // 禁用缓存
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+            const data = await response.json();
+            lastHeartbeatTime = Date.now();
+            
+            // 更新连接状态为正常
+            updateConnectionStatus(true);
+            
+            // 检查处理状态变化
+            if (data.is_processing !== isProcessing) {
+                isProcessing = data.is_processing;
+                saveProcessingState(isProcessing);
+                updateProcessingUI();
+            }
+            
+            // 恢复缓冲的输出
+            if (data.is_processing && data.output_buffer && data.output_buffer.length > 0) {
+                const outputArea = document.getElementById('outputArea');
+                if (outputArea && outputArea.children.length === 0) {
+                    data.output_buffer.forEach(lineText => {
+                        if (lineText.trim() !== '') {
+                            const line = document.createElement('div');
+                            line.textContent = lineText;
+                            outputArea.appendChild(line);
+                        }
+                    });
+                    outputArea.scrollTop = outputArea.scrollHeight;
+                }
+            }
+        } else {
+            // 响应不正常，标记为断开
+            handleHeartbeatFailure();
+        }
+    } catch (error) {
+        // 如果是请求被中止（AbortError），不处理
+        if (error.name === 'AbortError') {
+            console.log('心跳请求被中止');
+            return;
+        }
+        // 其他请求失败，标记为断开
+        handleHeartbeatFailure();
+    }
+}
+
+function handleHeartbeatFailure() {
+    // 处理心跳失败
+    const now = Date.now();
+    const timeSinceLastHeartbeat = now - lastHeartbeatTime;
+    
+    // 如果超过超时时间没有成功的心跳，标记为断开
+    if (timeSinceLastHeartbeat > HEARTBEAT_TIMEOUT) {
+        updateConnectionStatus(false);
+    }
+}
+
+function handleVisibilityChange() {
+    // 处理页面可见性变化
+    if (document.hidden) {
+        // 页面隐藏时，记录日志
+        console.log('页面隐藏');
+    } else {
+        // 页面显示时，检查是否需要立即更新状态
+        console.log('页面显示，检查连接状态');
+        const now = Date.now();
+        const timeSinceLastHeartbeat = now - lastHeartbeatTime;
+        // 如果超过心跳间隔没有更新，立即执行一次心跳
+        if (timeSinceLastHeartbeat > HEARTBEAT_INTERVAL) {
+            doHeartbeat();
+        }
+    }
+}
 
 // ==================== 标签切换 ====================
 
@@ -161,6 +361,12 @@ async function startExecution() {
     const outputArea = document.getElementById('outputArea');
     const runMode = document.querySelector('input[name="runMode"]:checked').value;
     const verbose = document.getElementById('verboseMode').checked;
+    
+    // 检查是否已在处理中
+    if (isProcessing) {
+        showAlert('已有任务在运行中，请等待完成后再启动新任务', 'error');
+        return;
+    }
     
     // 构建参数
     let args = [runMode];
@@ -740,6 +946,40 @@ function updateLastUpdateTime() {
         '最后更新：' + new Date().toLocaleString();
 }
 
+// 更新系统状态显示
+function updateSystemStatus() {
+    console.log('更新系统状态:', isProcessing ? '正在处理任务...' : '系统就绪');
+    const statusElement = document.getElementById('systemStatus');
+    if (!statusElement) {
+        console.error('找不到systemStatus元素');
+        return;
+    }
+    if (isProcessing) {
+        statusElement.textContent = '正在处理任务...';
+        statusElement.className = 'processing';
+    } else {
+        statusElement.textContent = '系统就绪';
+        statusElement.className = 'ready';
+    }
+}
+
+// 更新连接状态显示
+function updateConnectionStatus(connected) {
+    console.log('更新连接状态:', connected ? '后台连接正常' : '后台连接断开');
+    const lastUpdateElement = document.getElementById('lastUpdate');
+    if (!lastUpdateElement) {
+        console.error('找不到lastUpdate元素');
+        return;
+    }
+    if (connected) {
+        lastUpdateElement.textContent = '后台连接正常 | 最后更新：' + new Date().toLocaleString();
+        lastUpdateElement.className = 'connected';
+    } else {
+        lastUpdateElement.textContent = '后台连接断开';
+        lastUpdateElement.className = 'disconnected';
+    }
+}
+
 // ==================== 章节定义管理 ====================
 
 function renderSectionsTable() {
@@ -921,20 +1161,6 @@ window.onclick = function(event) {
 
 // ==================== 处理状态管理 ====================
 
-async function checkProcessingStatus() {
-    try {
-        const response = await fetch(`${API_BASE}/status`);
-        const data = await response.json();
-        
-        if (data.is_processing !== isProcessing) {
-            isProcessing = data.is_processing;
-            updateProcessingUI();
-        }
-    } catch (error) {
-        console.error('检查处理状态失败：', error);
-    }
-}
-
 function updateProcessingUI() {
     const startButton = document.querySelector('button[onclick="startExecution()"]');
     const stopButton = document.createElement('button');
@@ -948,6 +1174,12 @@ function updateProcessingUI() {
         startButton.disabled = true;
         startButton.textContent = '处理中...';
         
+        // 禁用配置控件
+        updateConfigControlsState(true);
+        
+        // 更新系统状态
+        updateSystemStatus();
+        
         // 检查是否已存在停止按钮
         if (!document.querySelector('button[onclick="stopExecution()"]')) {
             buttonContainer.appendChild(stopButton);
@@ -955,6 +1187,12 @@ function updateProcessingUI() {
     } else {
         startButton.disabled = false;
         startButton.textContent = '开始执行';
+        
+        // 启用配置控件
+        updateConfigControlsState(false);
+        
+        // 更新系统状态
+        updateSystemStatus();
         
         // 移除停止按钮
         const existingStopButton = document.querySelector('button[onclick="stopExecution()"]');
