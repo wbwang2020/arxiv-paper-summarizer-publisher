@@ -368,12 +368,21 @@ async function startExecution() {
         return;
     }
     
+    // 立即设置处理状态为true，防止重复点击
+    isProcessing = true;
+    saveProcessingState(isProcessing);
+    updateProcessingUI();
+    
     // 构建参数
     let args = [runMode];
     
     if (runMode === '--paper') {
         const paperId = document.getElementById('paperId').value.trim();
         if (!paperId) {
+            // 恢复处理状态
+            isProcessing = false;
+            saveProcessingState(isProcessing);
+            updateProcessingUI();
             showAlert('请输入arXiv ID', 'error');
             return;
         }
@@ -441,6 +450,11 @@ async function startExecution() {
     } catch (error) {
         showAlert('执行失败：' + error.message, 'error');
         addOperation(getModeName(runMode), '失败');
+    } finally {
+        // 无论成功失败，都恢复处理状态
+        isProcessing = false;
+        saveProcessingState(isProcessing);
+        updateProcessingUI();
     }
 }
 

@@ -272,8 +272,8 @@ scheduler:
 
 def check_environment():
     """检查环境配置"""
-    # 加载.env文件
-    load_dotenv()
+    # 加载.env文件（系统环境变量优先级高于.env文件）
+    load_dotenv(override=False)
     
     required_vars = []
     
@@ -432,12 +432,13 @@ def publish_papers_to_zhihu(config: Config, papers: List[Dict]) -> Dict:
     return {"success": success_count, "failed": failed_count, "total": len(papers)}
 
 
-def scan_and_summarize(system: ArxivSurveySystem) -> Dict:
+def scan_and_summarize(system: ArxivSurveySystem, publish: bool = False) -> Dict:
     """
     扫描arXiv并总结论文
     
     Args:
         system: 系统实例
+        publish: 是否发布到知乎（默认False）
         
     Returns:
         扫描结果统计
@@ -446,7 +447,7 @@ def scan_and_summarize(system: ArxivSurveySystem) -> Dict:
     output_handler.info("步骤1: 扫描arXiv论文")
     output_handler.info("=" * 70)
     
-    result = system.run_once()
+    result = system.run_once(publish=publish)
     
     output_handler.info(f"\n扫描完成:")
     output_handler.info(f"  成功: {result.success}")
@@ -578,7 +579,7 @@ def main():
         elif args.scan:
             # 仅扫描和总结
             output_handler.info("\n执行论文扫描和总结...")
-            result = scan_and_summarize(system)
+            result = scan_and_summarize(system, publish=False)
             
             output_handler.info("\n" + "=" * 70)
             output_handler.info("扫描和总结完成")

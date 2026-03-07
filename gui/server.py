@@ -18,11 +18,15 @@ import threading
 from pathlib import Path
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
+from dotenv import load_dotenv
 
 
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 加载.env文件（系统环境变量优先级高于.env文件）
+load_dotenv(override=False)
 
 # 获取GUI目录
 GUI_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -283,6 +287,10 @@ def run_main():
         env['PYTHONIOENCODING'] = 'utf-8'
         env['LANG'] = 'en_US.UTF-8'
         env['LC_ALL'] = 'en_US.UTF-8'
+        
+        # 从.env文件加载环境变量
+        env['DEEPSEEK_API_KEY'] = os.getenv('DEEPSEEK_API_KEY', '')
+        env['ZHIHU_COOKIE'] = os.getenv('ZHIHU_COOKIE', '')
         
         # 标记为处理中
         is_processing = True

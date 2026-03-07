@@ -83,14 +83,41 @@ class ArxivSurveySystem:
             self.config.zhihu.enabled = os.getenv("ZHIHU_ENABLED", "true").lower() == "true"
             output_handler.info(f"从环境变量覆盖 zhihu.enabled: {self.config.zhihu.enabled}")
         
+        # Cookie处理：优先使用环境变量，如果配置文件使用占位符格式则解析
         if os.getenv("ZHIHU_COOKIE"):
+            old_cookie = self.config.zhihu.cookie
             self.config.zhihu.cookie = os.getenv("ZHIHU_COOKIE", "")
-            output_handler.info("从环境变量覆盖 zhihu.cookie")
+            # 只显示Cookie的前10个字符和后10个字符，保护敏感信息
+            old_display = old_cookie[:10] + "..." + old_cookie[-10:] if old_cookie and not old_cookie.startswith("${") else "占位符"
+            new_display = self.config.zhihu.cookie[:10] + "..." + self.config.zhihu.cookie[-10:] if self.config.zhihu.cookie else "空"
+            output_handler.info(f"从环境变量覆盖 zhihu.cookie: {old_display} → {new_display}")
+        elif self.config.zhihu.cookie.startswith("${") and self.config.zhihu.cookie.endswith("}"):
+            # 配置文件使用占位符格式，尝试解析
+            env_var = self.config.zhihu.cookie[2:-1]
+            env_value = os.getenv(env_var, "")
+            self.config.zhihu.cookie = env_value
+            if env_value:
+                output_handler.info(f"从环境变量解析 zhihu.cookie 占位符: {env_var}")
+            else:
+                output_handler.warning(f"zhihu.cookie 占位符 {env_var} 对应的环境变量未设置，使用空值")
         
-        # DeepSeek API密钥覆盖
+        # API密钥处理：优先使用环境变量，如果配置文件使用占位符格式则解析
         if os.getenv("DEEPSEEK_API_KEY"):
+            old_api_key = self.config.ai.api_key
             self.config.ai.api_key = os.getenv("DEEPSEEK_API_KEY", "")
-            output_handler.info("从环境变量覆盖 ai.api_key")
+            # 只显示API密钥的前10个字符和后4个字符，保护敏感信息
+            old_display = old_api_key[:10] + "..." + old_api_key[-4:] if old_api_key and not old_api_key.startswith("${") else "占位符"
+            new_display = self.config.ai.api_key[:10] + "..." + self.config.ai.api_key[-4:] if self.config.ai.api_key else "空"
+            output_handler.info(f"从环境变量覆盖 ai.api_key: {old_display} → {new_display}")
+        elif self.config.ai.api_key.startswith("${") and self.config.ai.api_key.endswith("}"):
+            # 配置文件使用占位符格式，尝试解析
+            env_var = self.config.ai.api_key[2:-1]
+            env_value = os.getenv(env_var, "")
+            self.config.ai.api_key = env_value
+            if env_value:
+                output_handler.info(f"从环境变量解析 ai.api_key 占位符: {env_var}")
+            else:
+                output_handler.warning(f"ai.api_key 占位符 {env_var} 对应的环境变量未设置，使用空值")
         
         # 初始化组件
         self.scanner = ArxivScanner(self.config.arxiv)
@@ -141,10 +168,13 @@ class ArxivSurveySystem:
             self.config.zhihu.enabled = False
             return False
     
-    def run_once(self) -> ProcessingResult:
+    def run_once(self, publish: bool = True) -> ProcessingResult:
         """
         执行一次完整的扫描-总结-发布流程
         
+        Args:
+            publish: 是否发布到知乎（默认True）
+            
         Returns:
             处理结果
         """
@@ -192,7 +222,7 @@ class ArxivSurveySystem:
             # 执行任务
             batch_progress.start_paper(paper.arxiv_id, paper.title)
             try:
-                self._execute_task_with_progress(task, batch_progress)
+                self._execute_task_with_progress(task, batch_progress, publish)
                 batch_progress.mark_success()
             except APIKeyError as e:
                 # API密钥错误，终止整个处理流程
@@ -395,13 +425,14 @@ class ArxivSurveySystem:
         
         return task
     
-    def _execute_task_with_progress(self, task: PaperTask, batch_progress: BatchProgress) -> PaperTask:
+    def _execute_task_with_progress(self, task: PaperTask, batch_progress: BatchProgress, publish: bool = True) -> PaperTask:
         """
         执行单个任务（带进度显示）
         
         Args:
             task: 处理任务
             batch_progress: 批量进度显示
+            publish: 是否发布到知乎（默认True）
             
         Returns:
             更新后的任务
@@ -456,7 +487,7 @@ class ArxivSurveySystem:
             progress.complete_step(f"已保存到 {file_path}")
             
             # 5. 发布到知乎
-            if self.config.zhihu.enabled:
+            if publish and self.config.zhihu.enabled:
                 progress.start_step(5, "发布知乎")
                 task.update_status(TaskStatus.PUBLISHING)
                 

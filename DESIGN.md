@@ -8,6 +8,7 @@
 - 使用AI工具（DeepSeek）进行详细总结
 - 本地缓存Markdown格式总结
 - 自动发布到知乎（支持进度显示）
+- 自动发布到飞书（支持进度显示）
 
 ### 1.2 技术栈
 - **语言**: Python 3.10+
@@ -30,9 +31,9 @@
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────┐ │
 │  │   Scanner   │  │   Summarizer│  │   Storage   │  │ Publisher│ │
 │  │   Module    │→ │   Module    │→ │   Module    │→ │  Module  │ │
-│  │  (arXiv API)│  │  (DeepSeek) │  │  (Markdown) │  │ (Zhihu)  │ │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────┘ │
-│         ↑                                              ↑         │
+│  │  (arXiv API)│  │  (DeepSeek) │  │  (Markdown) │  │(Zhihu/  │ │
+│  └─────────────┘  └─────────────┘  └─────────────┘  │ Feishu)  │ │
+│         ↑                                              └─────────┘ │
 │         └──────────────────────────────────────────────┘         │
 │                         Scheduler Module                         │
 └─────────────────────────────────────────────────────────────────┘
@@ -164,6 +165,15 @@ class ZhihuConfig(BaseModel):
             return os.getenv(env_var, "")
         return self.cookie
 
+class FeishuConfig(BaseModel):
+    """飞书配置"""
+    enabled: bool = False
+    app_id: str = Field(default="", description="飞书应用ID")
+    app_secret: str = Field(default="", description="飞书应用密钥")
+    folder_token: Optional[str] = None    # 目标文件夹Token（可选）
+    notify: bool = True                  # 是否发送通知
+    notify_user_ids: List[str] = Field(default_factory=list, description="通知用户ID列表")
+
 class SchedulerConfig(BaseModel):
     """调度配置"""
     enabled: bool = True
@@ -176,6 +186,7 @@ class Config(BaseModel):
     ai: AIConfig
     storage: StorageConfig
     zhihu: ZhihuConfig
+    feishu: FeishuConfig
     scheduler: SchedulerConfig
     
     @classmethod
@@ -292,6 +303,7 @@ class PaperTask(BaseModel):
     summary: Optional[PaperSummary] = None
     local_path: Optional[str] = None
     zhihu_url: Optional[str] = None
+    feishu_url: Optional[str] = None
     
     def update_status(self, status: TaskStatus, error: str = None):
         """更新任务状态"""
@@ -1265,7 +1277,121 @@ def _debug_screenshot(self, path: str):
 
 ---
 
-### 3.7 调度模块 (scheduler/)
+### 3.7 飞书发布模块 (publisher/)
+
+#### 3.7.1 接口定义
+```python
+class FeishuPublisher:
+    """飞书文档发布器"""
+    
+    BASE_URL = "https://open.feishu.cn"
+    
+    def __init__(self, config: FeishuConfig):
+        """初始化发布器"""
+        pass
+    
+    def publish(
+        self,
+        summary: PaperSummary,
+        paper: ArxivPaper
+    ) -> Optional[str]:
+        """
+        发布文章到飞书
+        
+        Args:
+            summary: 论文总结
+            paper: 论文信息
+            
+        Returns:
+            飞书文档URL，失败返回None
+        """
+        pass
+    
+    def check_login(self) -> bool:
+        """检查登录状态"""
+        pass
+    
+    def get_user_info(self) -> Optional[Dict]:
+        """获取当前登录用户信息"""
+        pass
+    
+    def create_document(
+        self,
+        title: str,
+        content: str
+    ) -> Optional[str]:
+        """
+        创建飞书文档
+        
+        Args:
+            title: 文档标题
+            content: 文档内容（Markdown格式）
+            
+        Returns:
+            文档URL，失败返回None
+        """
+        pass
+    
+    def _markdown_to_feishu_blocks(self, markdown_content: str) -> List[Dict]:
+        """
+        将Markdown转换为飞书文档块格式
+        
+        Args:
+            markdown_content: Markdown内容
+            
+        Returns:
+            飞书文档块列表
+        """
+        pass
+```
+
+#### 3.7.2 飞书发布配置说明
+**飞书配置方式**：
+
+```yaml
+feishu:
+  enabled: true                   # 是否启用飞书发布
+  app_id: "cli_xxxxxxxxxxxxxxxx"  # 飞书应用ID
+  app_secret: "xxxxxxxxxxxxxxx"    # 飞书应用密钥
+  folder_token: ""                # 目标文件夹Token（可选）
+  notify: true                    # 是否发送通知
+  notify_user_ids: []             # 通知用户ID列表
+```
+
+**配置说明**：
+- `enabled`: 是否启用飞书发布功能
+- `app_id`: 飞书应用的App ID
+- `app_secret`: 飞书应用的App Secret
+- `folder_token`: 目标文件夹的Token（可选，不指定则创建在根目录）
+- `notify`: 是否发送通知
+- `notify_user_ids`: 需要通知的用户ID列表
+
+#### 3.7.3 飞书发布流程
+1. **认证**：使用App ID和App Secret获取访问令牌
+2. **创建文档**：调用飞书API创建新文档
+3. **转换内容**：将Markdown内容转换为飞书文档块格式
+4. **更新文档**：将转换后的内容写入文档
+5. **移动文档**：如果指定了文件夹，将文档移动到目标文件夹
+6. **发送通知**：如果启用了通知，发送消息通知指定用户
+
+#### 3.7.4 飞书API说明
+**主要API端点**：
+- 获取访问令牌：`POST https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal`
+- 创建文档：`POST https://open.feishu.cn/open-apis/docx/v1/documents`
+- 更新文档：`PATCH https://open.feishu.cn/open-apis/docx/v1/documents/{document_token}/blocks/{block_id}`
+- 获取文档块：`GET https://open.feishu.cn/open-apis/docx/v1/documents/{document_token}/blocks/{block_id}`
+- 移动文档：`POST https://open.feishu.cn/open-apis/drive/explorer/v2/file/{file_token}/move_to_folder`
+- 发送消息：`POST https://open.feishu.cn/open-apis/message/v4/send`
+
+**注意事项**：
+- 飞书API需要使用访问令牌进行认证
+- 访问令牌有效期为2小时，需要定期刷新
+- 飞书文档使用块结构，需要将Markdown转换为块格式
+- 飞书API有请求频率限制，需要控制请求速率
+
+---
+
+### 3.8 调度模块 (scheduler/)
 
 #### 3.7.1 接口定义
 ```python
@@ -1320,10 +1446,13 @@ class ArxivSurveySystem:
         """
         pass
     
-    def run_once(self) -> ProcessingResult:
+    def run_once(self, publish: bool = True) -> ProcessingResult:
         """
         执行一次完整的扫描-总结-发布流程
         
+        Args:
+            publish: 是否发布到知乎（默认True）
+            
         Returns:
             处理结果（成功数、失败数、跳过数）
         """
@@ -2046,8 +2175,14 @@ export DEEPSEEK_API_KEY="your_api_key"
 export ZHIHU_COOKIE="your_cookie"
 export ZHIHU_ENABLED="true"
 
-# 单次执行
+# 完整流程：扫描+总结+发布
 python main.py --run-once
+
+# 仅扫描和总结（不发布）
+python main.py --scan
+
+# 仅发布已总结的论文
+python main.py --publish
 
 # 持续运行
 python main.py --daemon
